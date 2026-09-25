@@ -1,0 +1,36 @@
+{
+  "url": "http://127.0.0.1:8080/",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "Meridian",
+      "hasCanvas": false,
+      "bodyTextLen": 2628,
+      "bodyTextHash": "712ed6f942da855bc61b244ea375fa3e41e1ed92dda741721adddb639ecefa59",
+      "bodyTextPrefix": "Meridian Docket Vaults Settlements Protocol Open a vault RESOLUT",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-preview.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "Meridian",
+      "hasCanvas": false,
+      "bodyTextLen": 2580,
+      "bodyTextHash": "a9a186aa2c0f9f285c85ac939c586dfaee09efa4cac2e335ac4af50619d38b6c",
+      "bodyTextPrefix": "Meridian RESOLUTION LAYER · ESCROW Hold funds on another chain. ",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-preview-mobile.png"
+    }
+  },
+  "brandWarnings": [],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/app-builder-preview.json"
+}

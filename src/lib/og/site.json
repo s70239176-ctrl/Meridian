@@ -1,0 +1,6 @@
+{
+  "title": "Meridian",
+  "type": "website",
+  "card": "custom",
+  "description": "Cross-chain resolution layer escrow. Funds stay on the source chain. GenLayer only adjudicates. After finality, a message pays out."
+}
