@@ -17,6 +17,7 @@ Then, after the adjudicator is deployed:
 """
 
 from genlayer import *
+from dataclasses import dataclass
 
 
 @allow_storage

@@ -33,6 +33,7 @@ Judge it (evidence URLs separated by newlines):
 """
 
 from genlayer import *
+from dataclasses import dataclass
 
 
 @allow_storage
