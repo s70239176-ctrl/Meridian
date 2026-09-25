@@ -12,8 +12,11 @@ Appeals are protocol appeals on the `adjudicate` transaction
 (genlayer / client appeal). Do not add a second in-contract appeal
 that would pay early.
 
+Deploy to GenLayer Studio (studionet — hosted, gasless; see
+docs.genlayer.com/developers/intelligent-contracts/tools/genlayer-studio).
 Deploy the outbox first, then:
 
+    genlayer network set studionet
     genlayer deploy --contract contracts/meridian_adjudicator.py --args <outbox>
 
 Then on the outbox, as its deployer:
@@ -187,7 +190,7 @@ class MeridianAdjudicator(gl.Contract):
         equivalence = case.equivalence
         captured = list(urls)
 
-        def leader():
+        def evaluate() -> dict:
             pages = []
             for url in captured:
                 try:
@@ -218,20 +221,21 @@ class MeridianAdjudicator(gl.Contract):
             raw = gl.nondet.exec_prompt(prompt, response_format="json")
             return _normalize(raw)
 
-        def validator(leader_result) -> bool:
-            if not isinstance(leader_result, gl.vm.Return):
-                return False
-            try:
-                proposed = _normalize(leader_result.calldata)
-                mine = _normalize(leader())
-            except Exception:
-                return False
-            return (
-                proposed["verdict"] == mine["verdict"]
-                and int(proposed["payee_bps"]) == int(mine["payee_bps"])
-            )
-
-        agreed = gl.vm.run_nondet_unsafe(leader, validator)
+        # Every validator independently re-runs `evaluate` (re-fetching the same
+        # evidence URLs and re-prompting its own model) and an NLP comparison
+        # decides whether the two answers are equivalent under `principle` —
+        # the standard GenLayer consensus primitive for a leader/validator flow
+        # with a custom (non-strict) equivalence check, in place of a hand-rolled
+        # gl.vm.run_nondet_unsafe leader/validator pair.
+        agreed = gl.eq_principle.prompt_comparative(
+            evaluate,
+            principle=(
+                "Both answers must state the same verdict field: one of "
+                "release_to_payee, refund_to_payer, or split. When verdict is "
+                "split, payee_bps must be within 1000 of each other. The "
+                "reasoning text may differ in wording."
+            ),
+        )
         verdict = str(agreed["verdict"])
         bps = str(int(agreed["payee_bps"]))
         reasoning = str(agreed["reasoning"])

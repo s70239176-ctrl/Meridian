@@ -25,18 +25,21 @@ This matters, so we're upfront about it:
   validators), not real validator behavior.
 - **`contracts/meridian_adjudicator.py`** and **`contracts/settlement_outbox.py`**
   are real, deployable [GenLayer Intelligent Contracts](https://docs.genlayer.com) —
-  Python contracts that use GenLayer's actual leader/validator consensus
-  primitives (`gl.vm.run_nondet_unsafe`, `gl.nondet.exec_prompt`,
-  `gl.nondet.web.get`) to fetch evidence URLs and have an LLM judge the case
-  against a natural-language spec and "equivalence principle." Appeals on a
-  live deployment are GenLayer's own protocol-level appeals on the
-  `adjudicate` transaction — there is no separate in-contract appeal.
+  Python contracts that use GenLayer's actual consensus primitives
+  (`gl.eq_principle.prompt_comparative`, `gl.nondet.exec_prompt`,
+  `gl.nondet.web.get`) to fetch evidence URLs and have every validator's LLM
+  independently judge the case against a natural-language spec and
+  "equivalence principle," with an NLP-based comparison (not strict
+  field-equality) deciding whether their answers agree. Appeals on a live
+  deployment are GenLayer's own protocol-level appeals on the `adjudicate`
+  transaction — there is no separate in-contract appeal.
 - **The "Verify on GenLayer" button** on any case page is the bridge between
   the two: once you've deployed the contracts (see below) and set the env
   vars, this button calls the *real* deployed `MeridianAdjudicator` contract
-  on GenLayer's public **Testnet Bradbury** with that case's actual facts, and
-  shows you the genuine on-chain verdict and transaction hash — independent of
-  (and alongside) the simulated committee above.
+  on **GenLayer Studio** (`studionet` — GenLayer's stable hosted network) with
+  that case's actual facts, and shows you the genuine on-chain verdict and
+  transaction hash — independent of (and alongside) the simulated committee
+  above.
 
 ## Quickstart (simulation only, zero setup)
 
@@ -49,18 +52,22 @@ Open the app, go to **Docket**, and walk a case from *Locked* through *Run
 first round → Commit and reveal → (optionally) File appeal → Finalize and
 dispatch → Confirm receipt*. No env vars, no accounts, no blockchain.
 
-## Deploying the contracts (optional, for live testnet mode)
+## Deploying the contracts (optional, for live Studio mode)
 
-This turns on the real "Verify on GenLayer" button. It needs a funded
-**testnet-only** wallet — never your real one.
+This turns on the real "Verify on GenLayer" button, using
+[GenLayer Studio](https://docs.genlayer.com/developers/intelligent-contracts/tools/genlayer-studio)
+(`studionet`) — GenLayer's stable, hosted network. Studio is **gasless**: a 0
+GEN balance is expected and doesn't block anything, so there's no faucet step
+and no wallet to fund. You still need a keypair, just to sign the calls.
 
-1. Install the GenLayer CLI and Studio components:
+1. Install the GenLayer CLI and point it at Studio:
    ```bash
    npm install -g genlayer
    genlayer init
+   genlayer network set studionet
    ```
-2. Generate a fresh, throwaway keypair for this project (do **not** use an
-   existing wallet key):
+2. Generate a fresh keypair for this project (do **not** use an existing
+   wallet key):
    ```bash
    node scripts/gen-testnet-key.mjs
    ```
@@ -69,28 +76,29 @@ This turns on the real "Verify on GenLayer" button. It needs a funded
    ```
    GENLAYER_DEPLOYER_KEY=0x...
    ```
-3. Fund that address at the [GenLayer Testnet Faucet](https://testnet-faucet.genlayer.foundation/)
-   (claims 100 GEN, once per 7 days). **Note:** the faucet requires the
-   claiming wallet to hold ≥0.01 ETH on Ethereum mainnet as a Sybil check —
-   if your fresh throwaway address has none, claim from a wallet that does
-   and send the GEN to the deployer address instead.
-4. Deploy the outbox first, then the adjudicator (which needs the outbox's
+3. Deploy the outbox first, then the adjudicator (which needs the outbox's
    address), then bind them:
    ```bash
-   genlayer deploy --contract contracts/settlement_outbox.py --network testnetBradbury
-   genlayer deploy --contract contracts/meridian_adjudicator.py --args <outbox_address> --network testnetBradbury
+   genlayer deploy --contract contracts/settlement_outbox.py
+   genlayer deploy --contract contracts/meridian_adjudicator.py --args <outbox_address>
    # then, calling the outbox as its deployer:
    # set_adjudicator(<adjudicator_address>)
    ```
-5. Put both deployed addresses in `.env`:
+4. Put both deployed addresses in `.env`:
    ```
    VITE_MERIDIAN_ADJUDICATOR=0x...
    VITE_MERIDIAN_OUTBOX=0x...
    ```
-6. Restart `npm run dev`. Open any case with at least one evidence URL and
+5. Restart `npm run dev`. Open any case with at least one evidence URL and
    click **Verify on GenLayer** — this calls `create_escrow` and `adjudicate`
-   for real on Testnet Bradbury and shows the live verdict, escrow id, and a
-   link to [GenLayer's explorer](https://explorer-bradbury.genlayer.com/).
+   for real on Studio and shows the live verdict, escrow id, and a link to
+   [GenLayer Studio's explorer](https://genlayer-explorer.vercel.app/).
+
+Note: `studionet` is a shared, rate-limited environment (60 req/min, 1000/hr,
+10000/day per IP) meant for demos and collaboration, not durable storage —
+GenLayer also offers `testnetBradbury`/`testnetAsimov` (funded via a faucet)
+for longer-lived public testnet deployments, and `localnet` for fully local
+development.
 
 See `.env.example` for the full list of optional environment variables
 (a real Postgres/Neon `DATABASE_URL` and an `XAI_API_KEY` for LLM-backed
@@ -102,9 +110,10 @@ working fallback).
 - [`src/lib/protocol/`](src/lib/protocol) — the domain model: escrow/round/settlement
   types, the committee-selection and majority-vote math, the seeded demo
   cases, and the Zustand state machine driving the simulation.
-- [`src/lib/protocol/genlayer.server.ts`](src/lib/protocol/genlayer.server.ts) —
-  server-only bridge to the real deployed contracts (never bundled to the
-  browser; the deployer key stays server-side).
+- [`src/lib/protocol/genlayer.ts`](src/lib/protocol/genlayer.ts) — bridge to
+  the real deployed contracts via a `createServerFn`; TanStack Start extracts
+  its handler into a server-only chunk, so the deployer key never reaches the
+  browser bundle.
 - [`contracts/`](contracts) — the two GenLayer Intelligent Contracts.
 - [`src/routes/`](src/routes) — `escrows` (docket + case detail), `vaults`,
   `settlements`, `protocol` (architecture explainer), `new` (create a case).

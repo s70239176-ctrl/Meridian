@@ -9,7 +9,8 @@ its appeal window. A source-chain relayer reads `get_message` and
 submits the instruction to the vault. The vault must ignore anything
 that is not this finalized message.
 
-Deploy:
+Deploy to GenLayer Studio (studionet — hosted, gasless):
+    genlayer network set studionet
     genlayer deploy --contract contracts/settlement_outbox.py
 Then, after the adjudicator is deployed:
     set_adjudicator(<adjudicator address>)

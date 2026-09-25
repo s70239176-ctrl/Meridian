@@ -1,7 +1,10 @@
 /**
  * Bridge to the REAL, deployed GenLayer Intelligent Contracts
  * (contracts/meridian_adjudicator.py + contracts/settlement_outbox.py) on
- * Testnet Bradbury. This is separate from the client-side simulation in
+ * GenLayer Studio (studionet — GenLayer's stable hosted network, chain id
+ * 61999, https://studio.genlayer.com/api). Studio is gasless: a 0 GEN
+ * balance is expected and does not block deploys or writes, so there is no
+ * faucet step. This is separate from the client-side simulation in
  * store.ts — the simulation drives the rich committee/appeal UI instantly
  * with zero setup; this module lets you additionally *verify* any case
  * against the live contract, once deployed, and see the real on-chain
@@ -9,7 +12,10 @@
  *
  * Configured only when all three env vars are present:
  *   VITE_MERIDIAN_ADJUDICATOR, VITE_MERIDIAN_OUTBOX  (deployed addresses)
- *   GENLAYER_DEPLOYER_KEY                            (server-only signer)
+ *   GENLAYER_DEPLOYER_KEY                            (server-only signer —
+ *                                                      still needed to sign
+ *                                                      writes even though
+ *                                                      Studio is gasless)
  *
  * Only `verifyEscrowOnGenlayer` (a createServerFn) is safe to import from
  * client components (e.g. genlayer-verify.tsx) — TanStack Start extracts its
@@ -21,7 +27,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { createAccount, createClient } from "genlayer-js";
-import { testnetBradbury } from "genlayer-js/chains";
+import { studionet } from "genlayer-js/chains";
 import { TransactionStatus, type CalldataEncodable, type Hash } from "genlayer-js/types";
 
 export function isLiveGenlayerConfigured(): boolean {
@@ -40,7 +46,7 @@ function getClient(): Client {
   if (!privateKey) throw new Error("GENLAYER_DEPLOYER_KEY is not set");
   if (!client) {
     const account = createAccount(privateKey as `0x${string}`);
-    client = createClient({ chain: testnetBradbury, account });
+    client = createClient({ chain: studionet, account });
   }
   return client;
 }
@@ -75,6 +81,12 @@ function decodedReturnValue(receipt: Awaited<ReturnType<Client["waitForTransacti
   return String(value).trim();
 }
 
+/** studionet's own explorer, straight from the chain definition — not hardcoded. */
+function explorerTxUrl(hash: string): string {
+  const base = studionet.blockExplorers?.default.url ?? "https://genlayer-explorer.vercel.app";
+  return `${base}/tx/${hash}`;
+}
+
 export type OnChainVerification = {
   onChainEscrowId: string;
   createTx: string;
@@ -93,8 +105,8 @@ export type OnChainVerification = {
  * return-value field across versions. If `decodedReturnValue` comes back
  * empty for create_escrow, this falls back to `get_escrow` reads are not
  * possible without an id — in that case the error surfaces to the UI rather
- * than silently guessing an id, so verify against
- * https://explorer-bradbury.genlayer.com/ if this happens.
+ * than silently guessing an id, so verify on studionet's own explorer
+ * (linked from the error) if this happens.
  */
 export async function verifyOnGenlayer(input: {
   payer: string;
@@ -126,7 +138,7 @@ export async function verifyOnGenlayer(input: {
   const onChainEscrowId = decodedReturnValue(created.receipt);
   if (!onChainEscrowId) {
     throw new Error(
-      `create_escrow finalized (tx ${created.hash}) but its return value could not be decoded — check the transaction on https://explorer-bradbury.genlayer.com/tx/${created.hash}`,
+      `create_escrow finalized (tx ${created.hash}) but its return value could not be decoded — check the transaction at ${explorerTxUrl(created.hash)}`,
     );
   }
 
@@ -141,7 +153,7 @@ export async function verifyOnGenlayer(input: {
     createTx: created.hash,
     adjudicateTx: adjudicated.hash,
     verdict: verdict || "(finalized — see explorer for the decoded verdict)",
-    explorerUrl: `https://explorer-bradbury.genlayer.com/tx/${adjudicated.hash}`,
+    explorerUrl: explorerTxUrl(adjudicated.hash),
   };
 }
 
