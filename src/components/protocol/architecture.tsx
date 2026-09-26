@@ -5,17 +5,17 @@ const STEPS = [
   {
     kicker: "01 · Custody",
     title: "Source-chain vault",
-    body: "USDC, USDT or ETH is locked in a vault on Ethereum, Base, Arbitrum, Optimism or BNB Chain. Meridian never takes possession.",
+    body: "USDC is locked in Vault.sol, deployed on Arc Testnet. Meridian never takes possession — only the vault holds funds.",
   },
   {
     kicker: "02 · Judgment",
     title: "GenLayer only adjudicates",
-    body: "An Intelligent Contract reads evidence and natural language. Optimistic Democracy starts with 5 validators and grows 2n+1 on appeal.",
+    body: "The real, deployed MeridianAdjudicator contract fetches evidence and prompts its model. Every validator independently re-runs the check; an NLP comparison decides if they agree.",
   },
   {
     kicker: "03 · Settlement",
-    title: "Message after finality",
-    body: "When the appeal window closes, an external settlement message instructs the vault to release or refund. Not before.",
+    title: "Relayed after finality",
+    body: "Once finalized, a relayer reads the real settlement_outbox message and submits it to the vault, which releases or refunds. Not before.",
   },
 ];
 

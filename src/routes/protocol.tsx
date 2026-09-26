@@ -2,16 +2,9 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { Architecture } from "@/components/protocol/architecture";
 import { Button } from "@/components/ui/button";
 import { deployment } from "@/lib/protocol/deployment";
+import { arcExplorerAddressUrl } from "@/lib/chain/explorer";
 
 export const Route = createFileRoute("/protocol")({ component: ProtocolPage });
-
-const ESCALATION = [
-  { n: "5", d: "First round. One leader. Optimistic if majority equivalent." },
-  { n: "11", d: "Validator appeal. Fresh committee, same proposal. 2n+1." },
-  { n: "23", d: "Second appeal. Set roughly doubles. Bond 2.5× if you win." },
-  { n: "47", d: "Further appeal. Schelling point: honest judgment is cheaper." },
-  { n: "~1k", d: "Maximum set. Majority stands. Then — and only then — a message." },
-];
 
 function ProtocolPage() {
   const linked = deployment();
@@ -19,12 +12,12 @@ function ProtocolPage() {
     <div className="max-w-3xl">
       <p className="text-xs font-medium tracking-[0.16em] text-muted uppercase">How Meridian is wired</p>
       <h1 className="font-display mt-2 text-4xl tracking-tight text-fg sm:text-5xl">
-        Adjudication on GenLayer. Custody everywhere else.
+        Adjudication on GenLayer. Custody on Arc Testnet.
       </h1>
       <p className="mt-5 text-base leading-relaxed text-muted">
         Payments rails (x402), identity (ERC-8004) and interoperability (A2A) are shipping. Dispute resolution is
-        the missing layer. Meridian uses GenLayer for that layer only: Intelligent Contracts, Optimistic Democracy,
-        appeals, then an external message that a vault on another chain can trust.
+        the missing layer. Meridian uses GenLayer for that layer only: a real deployed Intelligent Contract judges
+        the case, then a relayer submits the real verdict to a real vault on Arc Testnet.
       </p>
 
       <Architecture className="mt-10" />
@@ -33,52 +26,54 @@ function ProtocolPage() {
         <h2 className="font-display text-3xl tracking-tight text-fg">Why the vault is not on GenLayer</h2>
         <p className="mt-4 text-sm leading-relaxed text-muted">
           If the same chain both holds the money and judges the dispute, every appeal is also a custody event.
-          Meridian keeps those jobs apart. The source-chain vault is dumb: lock, then release or refund when it
-          receives a settlement message that proves post-appeal finality. GenLayer never sees the private keys.
+          Meridian keeps those jobs apart. Vault.sol is dumb: lock, then release or refund only when the relayer
+          submits a verdict signed off by GenLayer. GenLayer never sees the vault's funds or private keys.
         </p>
       </section>
 
       <section className="mt-12">
-        <h2 className="font-display text-3xl tracking-tight text-fg">Optimistic Democracy, as used here</h2>
+        <h2 className="font-display text-3xl tracking-tight text-fg">How a verdict is actually reached</h2>
         <ul className="mt-4 space-y-3 text-sm leading-relaxed text-muted">
-          <li>First round always draws 5 validators. One leader proposes. The rest test the Equivalence Principle.</li>
-          <li>More than 50% equivalent → optimistic accept. An appeal window opens (minutes on the network; 90s in this console).</li>
-          <li>A validator appeal reseats a fresh committee of 2n+1 (11, then 23, then 47) against the same proposal.</li>
-          <li>A successful appellant receives 2.5× the posted bond. Honest judgment is the profitable strategy.</li>
-          <li>Only after the window closes with no valid appeal is the verdict final — and only then is a message dispatched.</li>
+          <li>The deployed MeridianAdjudicator contract's leader fetches the case's evidence URLs and prompts its model for a verdict.</li>
+          <li>Every validator independently re-fetches the same evidence and re-runs the same prompt with its own model.</li>
+          <li><code className="text-fg">gl.eq_principle.prompt_comparative</code> — GenLayer's real consensus primitive — decides via NLP whether the leader's and each validator's answers agree under the stated equivalence principle.</li>
+          <li>Appeals on a live case are GenLayer's own protocol-level appeals on the adjudicate transaction, not a separate in-app step.</li>
+          <li>Only once GenLayer finalizes does <code className="text-fg">SettlementOutbox.record</code> get called, producing the real payout instruction the relayer reads.</li>
         </ul>
-        <ol className="mt-8 grid gap-3 sm:grid-cols-5">
-          {ESCALATION.map((row) => (
-            <li key={row.n} className="rounded-lg bg-surface p-4 shadow-[var(--shadow-border)]">
-              <p className="font-display text-2xl tracking-tight text-fg tabular-nums">{row.n}</p>
-              <p className="mt-2 text-xs leading-relaxed text-muted">{row.d}</p>
-            </li>
-          ))}
-        </ol>
       </section>
 
       <section className="mt-12">
         <h2 className="font-display text-3xl tracking-tight text-fg">The settlement message</h2>
         <p className="mt-4 text-sm leading-relaxed text-muted">
-          Type <span className="text-fg">meridian.settlement.v1</span>. It names the vault, the instruction
-          (release, refund, or split), the recipient, the finality hash, the committee root, and the number of
-          appeal rounds. The vault contract verifies that proof. If the message is missing any of it, funds stay put.
+          <code className="text-fg">SettlementOutbox.get_message</code> returns the real, finalized instruction: verdict, payee share, source chain, vault address, asset, amount, and recipient. The relayer parses this and calls Vault.sol's <code className="text-fg">settle()</code> — the only step where funds actually move.
         </p>
       </section>
 
       <section className="mt-12">
         <h2 className="font-display text-3xl tracking-tight text-fg">Linked contracts</h2>
         <p className="mt-4 text-sm leading-relaxed text-muted">
-          Studio addresses are public. Set them on Vercel, then redeploy. Vite inlines <span className="text-fg">VITE_</span> values at build time, so a saved variable does nothing until the next build.
+          These addresses are read from environment variables at build time. Vite inlines <span className="text-fg">VITE_</span> values, so a saved variable does nothing until the next build.
         </p>
         <dl className="mt-6 space-y-4 text-sm">
           <div>
-            <dt className="text-xs tracking-[0.14em] text-muted uppercase">VITE_MERIDIAN_ADJUDICATOR</dt>
+            <dt className="text-xs tracking-[0.14em] text-muted uppercase">VITE_MERIDIAN_ADJUDICATOR (GenLayer Studio)</dt>
             <dd className="mt-1 break-all font-mono text-fg">{linked.adjudicator ?? "Not set"}</dd>
           </div>
           <div>
-            <dt className="text-xs tracking-[0.14em] text-muted uppercase">VITE_MERIDIAN_OUTBOX</dt>
+            <dt className="text-xs tracking-[0.14em] text-muted uppercase">VITE_MERIDIAN_OUTBOX (GenLayer Studio)</dt>
             <dd className="mt-1 break-all font-mono text-fg">{linked.outbox ?? "Not set"}</dd>
+          </div>
+          <div>
+            <dt className="text-xs tracking-[0.14em] text-muted uppercase">VITE_VAULT_ADDRESS (Arc Testnet)</dt>
+            <dd className="mt-1 break-all font-mono text-fg">
+              {linked.vault ? (
+                <a className="underline" href={arcExplorerAddressUrl(linked.vault)} target="_blank" rel="noreferrer">
+                  {linked.vault}
+                </a>
+              ) : (
+                "Not set"
+              )}
+            </dd>
           </div>
         </dl>
       </section>
@@ -86,8 +81,8 @@ function ProtocolPage() {
       <section className="mt-12">
         <h2 className="font-display text-3xl tracking-tight text-fg">What this console is</h2>
         <p className="mt-4 text-sm leading-relaxed text-muted">
-          A working model of the resolution-layer flow. The addresses above are the deployed contracts. Vault locks
-          and source-chain receipts are still not executed from this page.
+          A real client for the resolution-layer flow above. The addresses shown are the actual deployed contracts;
+          opening a vault deposits real testnet funds and every subsequent action is a real transaction.
         </p>
         <Button asChild className="mt-6">
           <Link to="/escrows">Open the docket</Link>

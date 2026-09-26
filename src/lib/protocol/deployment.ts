@@ -11,5 +11,6 @@ export function deployment() {
   return {
     adjudicator: address(import.meta.env.VITE_MERIDIAN_ADJUDICATOR),
     outbox: address(import.meta.env.VITE_MERIDIAN_OUTBOX),
+    vault: address(import.meta.env.VITE_VAULT_ADDRESS),
   };
 }

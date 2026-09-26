@@ -8,28 +8,24 @@ import type { EscrowStatus } from "@/lib/protocol/types";
 
 export const Route = createFileRoute("/escrows/")({ component: EscrowsPage });
 
-const FILTERS: { id: "all" | "active" | "window" | "settled"; label: string }[] = [
+const FILTERS: { id: "all" | "active" | "settled"; label: string }[] = [
   { id: "all", label: "All" },
-  { id: "active", label: "In adjudication" },
-  { id: "window", label: "Appeal window" },
+  { id: "active", label: "In progress" },
   { id: "settled", label: "Settled" },
 ];
 
-const ACTIVE: EscrowStatus[] = ["disputed", "proposing", "voting", "appealed"];
-const WINDOW: EscrowStatus[] = ["optimistic", "final", "dispatching"];
-const SETTLED: EscrowStatus[] = ["paid", "refunded"];
+const ACTIVE: EscrowStatus[] = ["locked", "adjudicating", "adjudicated", "relaying"];
 
 function EscrowsPage() {
   const escrows = useEscrowStore((s) => s.escrows);
-  const resetDemo = useEscrowStore((s) => s.resetDemo);
+  const clearLocalCases = useEscrowStore((s) => s.clearLocalCases);
   const [filter, setFilter] = useState<(typeof FILTERS)[number]["id"]>("all");
 
   const visible = useMemo(() => {
     return escrows.filter((e) => {
       if (filter === "all") return true;
-      if (filter === "active") return ACTIVE.includes(e.status) || e.status === "locked";
-      if (filter === "window") return WINDOW.includes(e.status);
-      return SETTLED.includes(e.status);
+      if (filter === "active") return ACTIVE.includes(e.status);
+      return e.status === "settled";
     });
   }, [escrows, filter]);
 
@@ -40,15 +36,15 @@ function EscrowsPage() {
           <p className="text-xs font-medium tracking-[0.16em] text-muted uppercase">Docket</p>
           <h1 className="font-display mt-2 text-4xl tracking-tight text-fg">Open escrows</h1>
           <p className="mt-2 max-w-xl text-sm leading-relaxed text-muted">
-            Each row is a vault on another chain plus a GenLayer case. Custody and judgment stay split.
+            Each row is a real vault deposit on Arc Testnet plus a real GenLayer case. Custody and judgment stay split.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button asChild>
             <Link to="/new">Open a vault</Link>
           </Button>
-          <Button variant="ghost" onClick={resetDemo}>
-            Reset demo
+          <Button variant="ghost" onClick={clearLocalCases} title="Forgets this browser's local list — does not touch any funds or on-chain state">
+            Clear local list
           </Button>
         </div>
       </div>

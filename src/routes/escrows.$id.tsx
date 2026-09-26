@@ -1,17 +1,11 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { CaseActions } from "@/components/protocol/case-actions";
-import { Committee } from "@/components/protocol/committee";
-import { GenlayerVerifyPanel } from "@/components/protocol/genlayer-verify";
 import { SettlementCard } from "@/components/protocol/settlement-card";
 import { StatusBadge } from "@/components/protocol/status-badge";
 import { Timeline } from "@/components/protocol/timeline";
-import {
-  chainLabel,
-  formatAmount,
-  formatClock,
-  shortAddr,
-  verdictLabel,
-} from "@/lib/protocol/format";
+import { chainLabel, formatAmount, formatClock, shortAddr } from "@/lib/protocol/format";
+import { arcExplorerAddressUrl, arcExplorerTxUrl } from "@/lib/chain/explorer";
+import { genlayerExplorerTxUrl } from "@/lib/protocol/genlayer-explorer";
 import { ADJUDICATOR_SOURCE } from "@/lib/protocol/contract-source";
 import { useEscrowStore } from "@/lib/protocol/store";
 import { CHAIN_META } from "@/lib/protocol/types";
@@ -34,9 +28,6 @@ function CasePage() {
     );
   }
 
-  const last = escrow.rounds[escrow.rounds.length - 1];
-  const prior = escrow.rounds.slice(0, -1);
-
   return (
     <div>
       <p className="text-xs font-medium tracking-[0.16em] text-muted uppercase">
@@ -54,8 +45,8 @@ function CasePage() {
         {[
           ["Vault chain", chainLabel(escrow.sourceChain)],
           ["Locked", formatAmount(escrow.amount, escrow.asset)],
-          ["Payer", escrow.payer.name],
-          ["Payee", escrow.payee.name],
+          ["Payer", shortAddr(escrow.payer)],
+          ["Payee", shortAddr(escrow.payee)],
         ].map(([k, v]) => (
           <div key={k} className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
             <dt className="text-xs tracking-[0.14em] text-faint uppercase">{k}</dt>
@@ -69,9 +60,16 @@ function CasePage() {
           <section>
             <h2 className="font-display text-2xl tracking-tight text-fg">Source-chain vault</h2>
             <p className="mt-2 text-sm leading-relaxed text-muted">
-              The lock lives on {chainLabel(escrow.sourceChain)} ({CHAIN_META[escrow.sourceChain].eip155}). Address{" "}
-              {shortAddr(escrow.vaultAddress, 6)}. Lock transaction {shortAddr(escrow.lockTx, 8)}. GenLayer cannot spend
-              this. Payer {shortAddr(escrow.payer.address)} · payee {shortAddr(escrow.payee.address)}.
+              The lock lives on {chainLabel(escrow.sourceChain)} ({CHAIN_META[escrow.sourceChain].eip155}). Real
+              deposit transaction{" "}
+              <a className="underline" href={arcExplorerTxUrl(escrow.lockTx)} target="_blank" rel="noreferrer">
+                {shortAddr(escrow.lockTx, 8)}
+              </a>{" "}
+              to vault{" "}
+              <a className="underline" href={arcExplorerAddressUrl(escrow.vaultAddress)} target="_blank" rel="noreferrer">
+                {shortAddr(escrow.vaultAddress, 6)}
+              </a>
+              . GenLayer cannot spend this. Payer {shortAddr(escrow.payer)} · payee {shortAddr(escrow.payee)}.
             </p>
           </section>
 
@@ -80,38 +78,34 @@ function CasePage() {
             <p className="mt-2 text-sm leading-relaxed text-muted">{escrow.equivalence}</p>
           </section>
 
-          {escrow.settlement ? <SettlementCard escrow={escrow} message={escrow.settlement} /> : null}
-
-          {last ? (
-            <section className="space-y-4">
-              <div>
-                <h2 className="font-display text-2xl tracking-tight text-fg">
-                  {last.kind === "initial" ? "Committee" : `Appeal round ${last.index + 1}`}
-                </h2>
-                <p className="mt-2 text-sm leading-relaxed text-muted">
-                  {last.committeeSize} validators · leader proposed {verdictLabel(last.proposedVerdict, last.splitBps)}.
-                  Models are greyboxed.
-                </p>
-                <p className="mt-3 text-sm leading-relaxed text-fg">{last.proposedReasoning}</p>
-              </div>
-              <Committee round={last} />
+          {escrow.genlayerEscrowId ? (
+            <section>
+              <h2 className="font-display text-2xl tracking-tight text-fg">GenLayer case</h2>
+              <p className="mt-2 text-sm leading-relaxed text-muted">
+                Escrow #{escrow.genlayerEscrowId} on the real deployed MeridianAdjudicator contract.
+                {escrow.createTx ? (
+                  <>
+                    {" "}
+                    Created:{" "}
+                    <a className="underline" href={genlayerExplorerTxUrl(escrow.createTx)} target="_blank" rel="noreferrer">
+                      {shortAddr(escrow.createTx, 8)}
+                    </a>
+                  </>
+                ) : null}
+                {escrow.adjudicateTx ? (
+                  <>
+                    {" "}
+                    · Adjudicated:{" "}
+                    <a className="underline" href={genlayerExplorerTxUrl(escrow.adjudicateTx)} target="_blank" rel="noreferrer">
+                      {shortAddr(escrow.adjudicateTx, 8)}
+                    </a>
+                  </>
+                ) : null}
+              </p>
             </section>
           ) : null}
 
-          {prior.length > 0 ? (
-            <section className="space-y-6">
-              <h2 className="font-display text-2xl tracking-tight text-fg">Prior rounds</h2>
-              {prior.map((round) => (
-                <div key={round.index} className="space-y-3">
-                  <p className="text-sm text-muted">
-                    Round {round.index + 1} · {round.kind.replaceAll("_", " ")} · {round.committeeSize} validators ·{" "}
-                    {verdictLabel(round.proposedVerdict, round.splitBps)}
-                  </p>
-                  <Committee round={round} />
-                </div>
-              ))}
-            </section>
-          ) : null}
+          <SettlementCard escrow={escrow} />
 
           {escrow.evidence.length > 0 ? (
             <section>
@@ -134,7 +128,8 @@ function CasePage() {
           <section>
             <h2 className="font-display text-2xl tracking-tight text-fg">Intelligent Contract</h2>
             <p className="mt-2 text-sm text-muted">
-              Deployable GenLayer source. It stores a verdict and emits the payout message only with on="finalized". It does not transfer the vault.
+              The real, deployed GenLayer source this case runs on. It stores a verdict and emits the payout message
+              only with on="finalized". It does not transfer the vault.
             </p>
             <pre className="mt-4 max-h-[32rem] overflow-auto rounded-xl bg-surface p-4 font-mono text-xs leading-relaxed text-muted shadow-[var(--shadow-border)]">
               {ADJUDICATOR_SOURCE}
@@ -144,7 +139,6 @@ function CasePage() {
 
         <aside className="space-y-8 md:sticky md:top-24 md:max-h-[calc(100dvh-7rem)] md:overflow-y-auto md:self-start">
           <CaseActions escrow={escrow} />
-          <GenlayerVerifyPanel escrow={escrow} />
           <div>
             <h2 className="font-display mb-4 text-xl tracking-tight text-fg">Path to payout</h2>
             <Timeline escrow={escrow} />

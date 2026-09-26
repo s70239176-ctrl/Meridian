@@ -4,31 +4,29 @@
  * GenLayer Studio (studionet — GenLayer's stable hosted network, chain id
  * 61999, https://studio.genlayer.com/api). Studio is gasless: a 0 GEN
  * balance is expected and does not block deploys or writes, so there is no
- * faucet step. This is separate from the client-side simulation in
- * store.ts — the simulation drives the rich committee/appeal UI instantly
- * with zero setup; this module lets you additionally *verify* any case
- * against the live contract, once deployed, and see the real on-chain
- * verdict and transaction hash.
+ * faucet step for this side. Every escrow in this app goes through these
+ * real calls — there is no local/simulated adjudication fallback.
  *
- * Configured only when all three env vars are present:
+ * Configured when both are present:
  *   VITE_MERIDIAN_ADJUDICATOR, VITE_MERIDIAN_OUTBOX  (deployed addresses)
  *   GENLAYER_DEPLOYER_KEY                            (server-only signer —
  *                                                      still needed to sign
  *                                                      writes even though
  *                                                      Studio is gasless)
  *
- * Only `verifyEscrowOnGenlayer` (a createServerFn) is safe to import from
- * client components (e.g. genlayer-verify.tsx) — TanStack Start extracts its
- * handler into a server-only chunk at build time, so GENLAYER_DEPLOYER_KEY
- * never reaches the browser bundle, the same way adjudicate.ts's XAI_API_KEY
- * access never does. Do not call `verifyOnGenlayer` or `getClient` directly
- * from client code.
+ * Only the exported `createServerFn`s are safe to import from client
+ * components — TanStack Start extracts each handler into a server-only
+ * chunk at build time, so GENLAYER_DEPLOYER_KEY never reaches the browser
+ * bundle. Do not call `getClient` or the raw read/write helpers from client
+ * code.
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { createAccount, createClient } from "genlayer-js";
 import { studionet } from "genlayer-js/chains";
 import { TransactionStatus, type CalldataEncodable, type Hash } from "genlayer-js/types";
+import { genlayerExplorerTxUrl } from "./genlayer-explorer.ts";
+import type { Verdict } from "./types.ts";
 
 export function isLiveGenlayerConfigured(): boolean {
   return Boolean(
@@ -51,11 +49,12 @@ function getClient(): Client {
   return client;
 }
 
-/**
- * Write, then poll until the network has decided the transaction. Returns the
- * finalized transaction (whose `txDataDecoded` carries the contract's return
- * value once decided) alongside its hash.
- */
+function requireAddress(name: string, value: string | undefined): string {
+  if (!value) throw new Error(`${name} is not configured`);
+  return value;
+}
+
+/** Write, then poll until the network has decided the transaction. */
 async function writeAndWait(address: string, functionName: string, args: CalldataEncodable[]) {
   const c = getClient();
   const hash = (await c.writeContract({
@@ -81,83 +80,18 @@ function decodedReturnValue(receipt: Awaited<ReturnType<Client["waitForTransacti
   return String(value).trim();
 }
 
-/** studionet's own explorer, straight from the chain definition — not hardcoded. */
-function explorerTxUrl(hash: string): string {
-  const base = studionet.blockExplorers?.default.url ?? "https://genlayer-explorer.vercel.app";
-  return `${base}/tx/${hash}`;
+/** Parse the `key=value` newline-delimited strings get_escrow/get_message return. */
+export function parseKeyValueRecord(text: string): Record<string, string> {
+  const record: Record<string, string> = {};
+  for (const line of text.split("\n")) {
+    const i = line.indexOf("=");
+    if (i === -1) continue;
+    record[line.slice(0, i)] = line.slice(i + 1);
+  }
+  return record;
 }
 
-export type OnChainVerification = {
-  onChainEscrowId: string;
-  createTx: string;
-  adjudicateTx: string;
-  verdict: string;
-  explorerUrl: string;
-};
-
-/**
- * Actually create the escrow and adjudicate it on the deployed GenLayer
- * contract, using the same case facts shown in the simulated UI. Returns the
- * real on-chain escrow id, both transaction hashes, and the real verdict the
- * live leader/validator consensus produced.
- *
- * Note: genlayer-js's typed transaction receipt does not guarantee a decoded
- * return-value field across versions. If `decodedReturnValue` comes back
- * empty for create_escrow, this falls back to `get_escrow` reads are not
- * possible without an id — in that case the error surfaces to the UI rather
- * than silently guessing an id, so verify on studionet's own explorer
- * (linked from the error) if this happens.
- */
-export async function verifyOnGenlayer(input: {
-  payer: string;
-  payee: string;
-  sourceChainEip155: string;
-  vault: string;
-  asset: string;
-  amount: string;
-  spec: string;
-  equivalence: string;
-  evidenceUrls: string[];
-}): Promise<OnChainVerification> {
-  const adjudicator = import.meta.env.VITE_MERIDIAN_ADJUDICATOR;
-  if (!adjudicator) throw new Error("VITE_MERIDIAN_ADJUDICATOR is not configured");
-  if (input.evidenceUrls.length === 0) {
-    throw new Error("At least one http(s) evidence URL is required for on-chain adjudication");
-  }
-
-  const created = await writeAndWait(adjudicator, "create_escrow", [
-    input.payer,
-    input.payee,
-    input.sourceChainEip155,
-    input.vault,
-    input.asset,
-    input.amount,
-    input.spec,
-    input.equivalence,
-  ]);
-  const onChainEscrowId = decodedReturnValue(created.receipt);
-  if (!onChainEscrowId) {
-    throw new Error(
-      `create_escrow finalized (tx ${created.hash}) but its return value could not be decoded — check the transaction at ${explorerTxUrl(created.hash)}`,
-    );
-  }
-
-  const adjudicated = await writeAndWait(adjudicator, "adjudicate", [
-    onChainEscrowId,
-    input.evidenceUrls.join("\n"),
-  ]);
-  const verdict = decodedReturnValue(adjudicated.receipt);
-
-  return {
-    onChainEscrowId,
-    createTx: created.hash,
-    adjudicateTx: adjudicated.hash,
-    verdict: verdict || "(finalized — see explorer for the decoded verdict)",
-    explorerUrl: explorerTxUrl(adjudicated.hash),
-  };
-}
-
-const VerifyInput = z.object({
+const CreateEscrowInput = z.object({
   payer: z.string(),
   payee: z.string(),
   sourceChainEip155: z.string(),
@@ -166,23 +100,120 @@ const VerifyInput = z.object({
   amount: z.string(),
   spec: z.string().max(4000),
   equivalence: z.string().max(2000),
-  evidenceUrls: z.array(z.string().max(500)).max(4),
 });
 
-export type VerifyOnGenlayerResult =
-  | ({ ok: true } & OnChainVerification)
+export type CreateEscrowResult =
+  | { ok: true; genlayerEscrowId: string; createTx: string; explorerUrl: string }
   | { ok: false; error: string };
 
-/** Client-callable server function wrapping verifyOnGenlayer with a safe error boundary. */
-export const verifyEscrowOnGenlayer = createServerFn({ method: "POST" })
-  .validator((input: unknown) => VerifyInput.parse(input))
-  .handler(async ({ data }): Promise<VerifyOnGenlayerResult> => {
-    if (!isLiveGenlayerConfigured()) {
-      return { ok: false, error: "Live GenLayer testnet mode is not configured on this server." };
-    }
+/** Real MeridianAdjudicator.create_escrow() call. */
+export const createEscrowOnGenlayer = createServerFn({ method: "POST" })
+  .validator((input: unknown) => CreateEscrowInput.parse(input))
+  .handler(async ({ data }): Promise<CreateEscrowResult> => {
     try {
-      const result = await verifyOnGenlayer(data);
-      return { ok: true, ...result };
+      const adjudicator = requireAddress("VITE_MERIDIAN_ADJUDICATOR", import.meta.env.VITE_MERIDIAN_ADJUDICATOR);
+      const created = await writeAndWait(adjudicator, "create_escrow", [
+        data.payer,
+        data.payee,
+        data.sourceChainEip155,
+        data.vault,
+        data.asset,
+        data.amount,
+        data.spec,
+        data.equivalence,
+      ]);
+      const genlayerEscrowId = decodedReturnValue(created.receipt);
+      if (!genlayerEscrowId) {
+        throw new Error(
+          `create_escrow finalized (tx ${created.hash}) but its return value could not be decoded — check ${genlayerExplorerTxUrl(created.hash)}`,
+        );
+      }
+      return { ok: true, genlayerEscrowId, createTx: created.hash, explorerUrl: genlayerExplorerTxUrl(created.hash) };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
+const AdjudicateInput = z.object({
+  genlayerEscrowId: z.string(),
+  evidenceUrls: z.array(z.string().max(500)).min(1).max(4),
+});
+
+export type AdjudicateResult =
+  | { ok: true; verdict: Verdict; adjudicateTx: string; explorerUrl: string }
+  | { ok: false; error: string };
+
+/** Real MeridianAdjudicator.adjudicate() call — the actual leader/validator consensus run. */
+export const adjudicateOnGenlayer = createServerFn({ method: "POST" })
+  .validator((input: unknown) => AdjudicateInput.parse(input))
+  .handler(async ({ data }): Promise<AdjudicateResult> => {
+    try {
+      const adjudicator = requireAddress("VITE_MERIDIAN_ADJUDICATOR", import.meta.env.VITE_MERIDIAN_ADJUDICATOR);
+      const adjudicated = await writeAndWait(adjudicator, "adjudicate", [
+        data.genlayerEscrowId,
+        data.evidenceUrls.join("\n"),
+      ]);
+      const verdict = decodedReturnValue(adjudicated.receipt);
+      if (verdict !== "release_to_payee" && verdict !== "refund_to_payer" && verdict !== "split") {
+        throw new Error(
+          `adjudicate finalized (tx ${adjudicated.hash}) but returned an unrecognized verdict "${verdict}" — check ${genlayerExplorerTxUrl(adjudicated.hash)}`,
+        );
+      }
+      return {
+        ok: true,
+        verdict,
+        adjudicateTx: adjudicated.hash,
+        explorerUrl: genlayerExplorerTxUrl(adjudicated.hash),
+      };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
+const EscrowIdInput = z.object({ genlayerEscrowId: z.string() });
+
+export type GetEscrowResult =
+  | { ok: true; record: Record<string, string> }
+  | { ok: false; error: string };
+
+/** Read-only MeridianAdjudicator.get_escrow() — the real, current on-chain state. */
+export const getEscrowOnGenlayer = createServerFn({ method: "GET" })
+  .validator((input: unknown) => EscrowIdInput.parse(input))
+  .handler(async ({ data }): Promise<GetEscrowResult> => {
+    try {
+      const adjudicator = requireAddress("VITE_MERIDIAN_ADJUDICATOR", import.meta.env.VITE_MERIDIAN_ADJUDICATOR);
+      const c = getClient();
+      const text = (await c.readContract({
+        address: adjudicator as `0x${string}`,
+        functionName: "get_escrow",
+        args: [data.genlayerEscrowId],
+      })) as string;
+      if (!text) throw new Error("unknown escrow on GenLayer");
+      return { ok: true, record: parseKeyValueRecord(text) };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
+export type GetOutboxMessageResult =
+  | { ok: true; hasMessage: false }
+  | { ok: true; hasMessage: true; record: Record<string, string> }
+  | { ok: false; error: string };
+
+/** Read-only SettlementOutbox.get_message() — the real payout instruction, once finalized. */
+export const getOutboxMessage = createServerFn({ method: "GET" })
+  .validator((input: unknown) => EscrowIdInput.parse(input))
+  .handler(async ({ data }): Promise<GetOutboxMessageResult> => {
+    try {
+      const outbox = requireAddress("VITE_MERIDIAN_OUTBOX", import.meta.env.VITE_MERIDIAN_OUTBOX);
+      const c = getClient();
+      const text = (await c.readContract({
+        address: outbox as `0x${string}`,
+        functionName: "get_message",
+        args: [data.genlayerEscrowId],
+      })) as string;
+      if (!text) return { ok: true, hasMessage: false };
+      return { ok: true, hasMessage: true, record: parseKeyValueRecord(text) };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }

@@ -1,70 +1,53 @@
 import { formatClock } from "@/lib/protocol/format";
+import { arcExplorerTxUrl } from "@/lib/chain/explorer";
+import { genlayerExplorerTxUrl } from "@/lib/protocol/genlayer-explorer";
 import type { Escrow, EscrowStatus } from "@/lib/protocol/types";
 
-type Step = { title: string; detail: string; at?: number; done: boolean; current: boolean };
+type Step = { title: string; detail: string; at?: number; href?: string; done: boolean; current: boolean };
 
 function phaseOf(status: EscrowStatus): number {
   switch (status) {
     case "locked":
       return 0;
-    case "disputed":
+    case "adjudicating":
       return 1;
-    case "proposing":
+    case "adjudicated":
       return 2;
-    case "voting":
+    case "relaying":
       return 3;
-    case "optimistic":
-    case "appealed":
+    case "settled":
       return 4;
-    case "final":
-      return 5;
-    case "dispatching":
-      return 6;
-    case "paid":
-    case "refunded":
-      return 7;
   }
 }
 
 export function buildTimeline(escrow: Escrow): Step[] {
-  const last = escrow.rounds[escrow.rounds.length - 1];
   const phase = phaseOf(escrow.status);
   const steps: Omit<Step, "done" | "current">[] = [
     {
       title: "Funds locked",
       detail: `Vault on ${escrow.sourceChain} holds ${escrow.amount} ${escrow.asset}. GenLayer has no custody.`,
       at: escrow.createdAt,
+      href: arcExplorerTxUrl(escrow.lockTx),
     },
     {
-      title: "Dispute opened",
-      detail: "Intelligent Contract begins. A 5-validator committee is drawn.",
+      title: "GenLayer adjudicates",
+      detail: "The real MeridianAdjudicator contract fetches evidence and reaches a verdict via validator consensus.",
+      href: escrow.adjudicateTx ? genlayerExplorerTxUrl(escrow.adjudicateTx) : undefined,
     },
     {
-      title: "Leader proposes",
-      detail: last
-        ? `Proposed ${last.proposedVerdict.replaceAll("_", " ")}.`
-        : "Leader executes the contract and proposes a result.",
-      at: last?.startedAt,
+      title: "Verdict finalized",
+      detail: escrow.verdict
+        ? `Verdict: ${escrow.verdict.replaceAll("_", " ")}${escrow.reasoning ? ` — ${escrow.reasoning}` : ""}`
+        : "Awaiting the finalized verdict.",
     },
     {
-      title: "Commit · reveal",
-      detail: "Committee commits votes, then reveals. Majority must find the proposal equivalent.",
-      at: last?.revealedAt,
+      title: "Settlement relayed",
+      detail: "The relayer reads the real settlement_outbox message and submits it to the vault.",
+      href: escrow.settleTx ? arcExplorerTxUrl(escrow.settleTx) : undefined,
     },
     {
-      title: "Appeal window",
-      detail: "Anyone may post a bond. Each appeal grows the set to 2n+1 (5 → 11 → 23).",
-      at: escrow.optimisticAt ?? escrow.appealedAt,
-    },
-    {
-      title: "Finality",
-      detail: "Post-appeal verdict is canonical. Still no funds moved.",
-      at: escrow.finalizedAt,
-    },
-    {
-      title: "External message pays out",
-      detail: "Settlement message is posted to the source-chain vault. Only then does money move.",
-      at: escrow.settlement?.confirmedAt ?? escrow.settlement?.dispatchedAt,
+      title: "Paid on the source chain",
+      detail: "The vault has released funds per the verdict. This is the only step that moves money.",
     },
   ];
 
@@ -97,6 +80,11 @@ export function Timeline({ escrow }: { escrow: Escrow }) {
             <p className="text-sm text-fg">{step.title}</p>
             <p className="mt-1 text-sm leading-relaxed text-muted">{step.detail}</p>
             {step.at ? <p className="mt-1 text-xs text-faint tabular-nums">{formatClock(step.at)}</p> : null}
+            {step.href ? (
+              <a className="mt-1 block text-xs text-muted underline" href={step.href} target="_blank" rel="noreferrer">
+                View transaction
+              </a>
+            ) : null}
           </div>
         </li>
       ))}

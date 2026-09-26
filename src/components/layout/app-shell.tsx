@@ -106,7 +106,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               : "No adjudicator linked. Set VITE_MERIDIAN_ADJUDICATOR and redeploy."}
             {linked.outbox ? ` · Outbox ${shortAddr(linked.outbox, 6)}` : ""}
           </p>
-          <p>Settlement type meridian.settlement.v1 · post-appeal only</p>
+          <p>{linked.vault ? `Vault ${shortAddr(linked.vault, 6)} on Arc Testnet` : "No vault deployed yet"}</p>
         </div>
       </footer>
     </div>

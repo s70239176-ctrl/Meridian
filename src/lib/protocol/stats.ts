@@ -26,9 +26,9 @@ export function chainVaults(escrows: Escrow[]): ChainVault[] {
     if (!row) continue;
     row.vaults += 1;
     const n = Number(e.amount) || 0;
-    if (e.status === "paid" || e.status === "refunded") row.settled += n;
+    if (e.status === "settled") row.settled += n;
     else row.locked += n;
-    if (e.settlement) row.messages += 1;
+    if (e.settleTx) row.messages += 1;
   }
   return [...map.values()].filter((r) => r.vaults > 0);
 }
@@ -37,12 +37,8 @@ export function protocolStats(escrows: Escrow[]) {
   const vaults = chainVaults(escrows);
   const locked = vaults.reduce((s, v) => s + v.locked, 0);
   const settled = vaults.reduce((s, v) => s + v.settled, 0);
-  const messages = escrows.filter((e) => e.settlement).length;
-  const live = escrows.filter((e) =>
-    ["disputed", "proposing", "voting", "optimistic", "appealed", "final", "dispatching"].includes(
-      e.status,
-    ),
-  ).length;
+  const messages = escrows.filter((e) => e.settleTx).length;
+  const live = escrows.filter((e) => e.status === "adjudicating" || e.status === "adjudicated" || e.status === "relaying").length;
   return {
     locked,
     settled,

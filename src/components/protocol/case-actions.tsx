@@ -4,84 +4,103 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { adjudicateEscrow } from "@/lib/protocol/adjudicate";
-import { formatRemaining } from "@/lib/protocol/format";
+import { adjudicateOnGenlayer, createEscrowOnGenlayer } from "@/lib/protocol/genlayer";
+import { relaySettlement } from "@/lib/chain/relay";
 import { useEscrowStore } from "@/lib/protocol/store";
-import type { Escrow } from "@/lib/protocol/types";
-import { useNow } from "./use-now";
-
-async function sleep(ms: number) {
-  await new Promise((r) => setTimeout(r, ms));
-}
+import { CHAIN_META, type Escrow } from "@/lib/protocol/types";
 
 export function CaseActions({ escrow }: { escrow: Escrow }) {
-  const now = useNow();
   const [busy, setBusy] = useState(false);
   const [evidenceUrl, setEvidenceUrl] = useState("");
   const [evidenceNote, setEvidenceNote] = useState("");
   const store = useEscrowStore();
 
-  const windowLeft =
-    escrow.status === "optimistic" && escrow.optimisticAt && now
-      ? escrow.optimisticAt + escrow.appealWindowMs - now
-      : null;
-  const windowClosed = windowLeft !== null && windowLeft <= 0;
+  const evidenceUrls = escrow.evidence
+    .map((e) => e.url)
+    .filter((u) => u.startsWith("http://") || u.startsWith("https://"));
 
-  async function runRound() {
+  async function retryGenlayerRegistration() {
     setBusy(true);
     try {
-      if (escrow.status === "locked") store.openDispute(escrow.id);
-      const result = await adjudicateEscrow({
+      const created = await createEscrowOnGenlayer({
         data: {
-          escrowId: escrow.id,
+          payer: escrow.payer,
+          payee: escrow.payee,
+          sourceChainEip155: CHAIN_META[escrow.sourceChain].eip155,
+          vault: escrow.vaultAddress,
+          asset: escrow.asset,
+          amount: escrow.amount,
           spec: escrow.spec,
           equivalence: escrow.equivalence,
-          evidence: escrow.evidence.map((e) => ({ label: e.label, url: e.url, note: e.note })),
         },
+      });
+      if (!created.ok) {
+        toast.error(created.error);
+        return;
+      }
+      store.updateEscrow(escrow.id, { genlayerEscrowId: created.genlayerEscrowId, createTx: created.createTx });
+      toast.message("Registered on GenLayer");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runAdjudication() {
+    if (!escrow.genlayerEscrowId) {
+      toast.error("This case was never registered on GenLayer — cannot adjudicate.");
+      return;
+    }
+    if (evidenceUrls.length === 0) {
+      toast.error("Add at least one http(s) evidence URL first.");
+      return;
+    }
+    setBusy(true);
+    store.updateEscrow(escrow.id, { status: "adjudicating" });
+    try {
+      const result = await adjudicateOnGenlayer({
+        data: { genlayerEscrowId: escrow.genlayerEscrowId, evidenceUrls },
       });
       if (!result.ok) {
         toast.error(result.error);
+        store.updateEscrow(escrow.id, { status: "locked" });
         return;
       }
-      store.beginProposal(escrow.id, {
+      store.updateEscrow(escrow.id, {
+        status: "adjudicated",
         verdict: result.verdict,
-        reasoning: result.reasoning,
-        splitBps: result.splitBps,
-        source: result.source,
+        adjudicateTx: result.adjudicateTx,
       });
-      toast.message(result.source === "ai" ? "Leader proposal from the validator network" : "Local leader proposal");
-      await sleep(700);
-      store.commitSeats(escrow.id);
-      await sleep(900);
-      store.revealVotes(escrow.id);
+      toast.message("Real verdict from GenLayer's leader/validator consensus");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Adjudication failed");
+      store.updateEscrow(escrow.id, { status: "locked" });
     } finally {
       setBusy(false);
     }
   }
 
-  async function continueAppealReview() {
+  async function runRelay() {
+    if (!escrow.genlayerEscrowId) return;
     setBusy(true);
+    store.updateEscrow(escrow.id, { status: "relaying" });
     try {
-      await sleep(500);
-      store.commitSeats(escrow.id);
-      await sleep(800);
-      store.revealVotes(escrow.id);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function payoutPath() {
-    setBusy(true);
-    try {
-      store.finalize(escrow.id);
-      await sleep(500);
-      store.dispatchSettlement(escrow.id);
-      await sleep(700);
-      store.confirmPayout(escrow.id);
-      toast.message("Settlement confirmed on the source chain");
+      const result = await relaySettlement({
+        data: { genlayerEscrowId: escrow.genlayerEscrowId, vaultEscrowId: escrow.vaultEscrowId },
+      });
+      if (!result.ok) {
+        toast.error(result.error);
+        store.updateEscrow(escrow.id, { status: "adjudicated" });
+        return;
+      }
+      store.updateEscrow(escrow.id, {
+        status: "settled",
+        settleTx: result.settleTx,
+        payeeBps: result.payeeBps,
+      });
+      toast.message("Vault settled for real on Arc Testnet");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Relay failed");
+      store.updateEscrow(escrow.id, { status: "adjudicated" });
     } finally {
       setBusy(false);
     }
@@ -101,125 +120,71 @@ export function CaseActions({ escrow }: { escrow: Escrow }) {
 
   return (
     <div className="space-y-4">
-      {(escrow.status === "locked" || escrow.status === "disputed") && (
-        <div className="space-y-3 rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
-          <p className="text-sm text-fg">Open dispute and run adjudication</p>
+      {escrow.status === "locked" && !escrow.genlayerEscrowId && (
+        <div className="space-y-3 rounded-xl border border-dashed border-fg/20 bg-surface p-4 shadow-[var(--shadow-border)]">
+          <p className="text-sm text-fg">Not registered on GenLayer yet</p>
           <p className="text-sm leading-relaxed text-muted">
-            Funds stay in the {escrow.sourceChain} vault. GenLayer will only produce a verdict.
+            Funds are deposited, but the create_escrow call to GenLayer didn't complete. Retry it before adjudicating.
           </p>
-          <Button onClick={runRound} disabled={busy}>
-            {busy ? "Running round…" : escrow.rounds.length ? "Run next round" : "Run first round"}
+          <Button onClick={retryGenlayerRegistration} disabled={busy}>
+            {busy ? "Registering…" : "Register on GenLayer"}
           </Button>
         </div>
       )}
 
-      {escrow.status === "proposing" && (
+      {escrow.status === "locked" && escrow.genlayerEscrowId && (
         <div className="space-y-3 rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
-          <p className="text-sm text-fg">Leader has proposed</p>
-          <p className="text-sm text-muted">Committee now commits, then reveals. Models stay greyboxed until reveal.</p>
-          <Button
-            onClick={async () => {
-              setBusy(true);
-              store.commitSeats(escrow.id);
-              await sleep(800);
-              store.revealVotes(escrow.id);
-              setBusy(false);
-            }}
-            disabled={busy}
-          >
-            {busy ? "Commit · reveal…" : "Commit and reveal"}
+          <p className="text-sm text-fg">Run adjudication</p>
+          <p className="text-sm leading-relaxed text-muted">
+            Funds stay in the {escrow.sourceChain} vault. This calls the real deployed MeridianAdjudicator contract
+            on GenLayer Studio — not a simulation.
+          </p>
+          <Button onClick={runAdjudication} disabled={busy || evidenceUrls.length === 0}>
+            {busy ? "Calling GenLayer…" : "Run adjudication"}
           </Button>
+          {evidenceUrls.length === 0 ? (
+            <p className="text-xs text-faint">Add at least one http(s) evidence URL below first.</p>
+          ) : null}
         </div>
       )}
 
-      {escrow.status === "voting" && (
+      {escrow.status === "adjudicating" && (
         <div className="space-y-3 rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
-          <p className="text-sm text-fg">Votes are committed</p>
-          <p className="text-sm text-muted">Reveal the committee. Majority equivalent opens the appeal window.</p>
-          <Button
-            onClick={async () => {
-              setBusy(true);
-              await sleep(400);
-              store.revealVotes(escrow.id);
-              setBusy(false);
-            }}
-            disabled={busy}
-          >
-            {busy ? "Revealing…" : "Reveal votes"}
-          </Button>
-        </div>
-      )}
-      {escrow.status === "appealed" && (
-        <div className="space-y-3 rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
-          <p className="text-sm text-fg">Appeal committee is seated</p>
-          <p className="text-sm text-muted">Fresh validators re-evaluate the existing proposal. No new leader.</p>
-          <Button onClick={continueAppealReview} disabled={busy}>
-            {busy ? "Revealing…" : "Commit and reveal"}
-          </Button>
-        </div>
-      )}
-
-      {escrow.status === "optimistic" && (
-        <div className="space-y-3 rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
-          <p className="text-sm text-fg">Appeal window</p>
+          <p className="text-sm text-fg">Adjudicating…</p>
           <p className="text-sm text-muted">
-            Compressed to 90s in this console (about 30 minutes on the network). Successful appellants receive 2.5× bond.
+            GenLayer's leader is fetching evidence and prompting its model; validators are independently re-running
+            the same check. This can take a moment.
           </p>
-          <p className="font-display text-3xl tabular-nums tracking-tight text-fg">
-            {windowClosed ? "Closed" : now ? formatRemaining(windowLeft ?? 0) : "—"}
-          </p>
-          <div className="flex flex-wrap gap-2">
-            <Button variant="secondary" onClick={() => store.fileAppeal(escrow.id)} disabled={busy || Boolean(windowClosed)}>
-              File validator appeal
-            </Button>
-            <Button variant="outline" onClick={() => store.skipAppealWindow(escrow.id)} disabled={busy}>
-              Close window
-            </Button>
-            {windowClosed ? (
-              <Button onClick={payoutPath} disabled={busy}>
-                Finalize and dispatch
-              </Button>
-            ) : null}
-          </div>
         </div>
       )}
 
-      {escrow.status === "final" && (
+      {escrow.status === "adjudicated" && (
         <div className="space-y-3 rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
           <p className="text-sm text-fg">Verdict is final</p>
-          <p className="text-sm text-muted">Post the external settlement message. The vault still has not moved funds.</p>
-          <Button
-            onClick={async () => {
-              setBusy(true);
-              store.dispatchSettlement(escrow.id);
-              await sleep(600);
-              store.confirmPayout(escrow.id);
-              setBusy(false);
-            }}
-            disabled={busy}
-          >
-            Dispatch payout message
+          <p className="text-sm text-muted">
+            Relay the real settlement_outbox message to the vault — this is the only step that moves funds.
+          </p>
+          <Button onClick={runRelay} disabled={busy}>
+            {busy ? "Relaying…" : "Relay settlement"}
           </Button>
         </div>
       )}
 
-      {escrow.status === "dispatching" && (
+      {escrow.status === "relaying" && (
         <div className="space-y-3 rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
-          <p className="text-sm text-fg">Message posted</p>
-          <Button onClick={() => store.confirmPayout(escrow.id)} disabled={busy}>
-            Confirm source-chain receipt
-          </Button>
+          <p className="text-sm text-fg">Relaying…</p>
+          <p className="text-sm text-muted">Submitting the verdict to Vault.sol on Arc Testnet.</p>
         </div>
       )}
 
-      {(escrow.status === "paid" || escrow.status === "refunded") && (
+      {escrow.status === "settled" && (
         <div className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
           <p className="text-sm text-fg">Settled on the source chain</p>
-          <p className="mt-1 text-sm text-muted">GenLayer’s work ended at finality. Custody never left the vault chain.</p>
+          <p className="mt-1 text-sm text-muted">Funds have actually moved. GenLayer's work ended at finality.</p>
         </div>
       )}
 
-      {escrow.status === "locked" || escrow.status === "disputed" ? (
+      {escrow.status === "locked" ? (
         <div className="space-y-3 rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
           <p className="text-sm text-fg">Attach evidence</p>
           <div className="space-y-2">
