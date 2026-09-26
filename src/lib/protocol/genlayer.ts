@@ -22,7 +22,7 @@
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { createAccount, createClient } from "genlayer-js";
+import { abi, createAccount, createClient } from "genlayer-js";
 import { studionet } from "genlayer-js/chains";
 import { TransactionStatus, type CalldataEncodable, type Hash } from "genlayer-js/types";
 import { genlayerExplorerTxUrl } from "./genlayer-explorer.ts";
@@ -99,11 +99,35 @@ async function writeAndWait(address: string, functionName: string, args: Calldat
   );
 }
 
-function decodedReturnValue(receipt: Awaited<ReturnType<Client["waitForTransactionReceipt"]>>): string {
-  const decoded = receipt.txDataDecoded as { calldata?: unknown; return?: unknown } | undefined;
-  const value = decoded?.return ?? decoded?.calldata;
-  if (value === undefined || value === null) return "";
-  return String(value).trim();
+/**
+ * Extract the real decoded return value from a finalized GenLayer Studio
+ * transaction. On studionet, genlayer-js's own `getTransaction` runs the
+ * result through `decodeLocalnetTransaction`, which leaves the leader's
+ * actual return value at `consensus_data.leader_receipt[].result`, encoded
+ * as `{ status: "return" | "rollback" | ..., payload: { raw: number[] } }`
+ * (payload.raw is the un-decoded calldata bytes) — NOT at `txDataDecoded`,
+ * which is only populated on the public testnets (Bradbury/Asimov).
+ */
+export function decodedReturnValue(receipt: unknown): string {
+  const consensusData = (receipt as { consensus_data?: unknown } | undefined)?.consensus_data as
+    | { leader_receipt?: unknown }
+    | undefined;
+  const leaderReceipt = consensusData?.leader_receipt;
+  const entry = (Array.isArray(leaderReceipt) ? leaderReceipt[0] : leaderReceipt) as
+    | { result?: { status?: string; payload?: { raw?: number[] } | string | null } }
+    | undefined;
+  const result = entry?.result;
+  if (!result || result.status !== "return") return "";
+  const payload = result.payload;
+  const raw = payload && typeof payload === "object" ? payload.raw : undefined;
+  if (!Array.isArray(raw)) return "";
+  try {
+    const decoded = abi.calldata.decode(Uint8Array.from(raw));
+    if (decoded === null || decoded === undefined) return "";
+    return String(decoded).trim();
+  } catch {
+    return "";
+  }
 }
 
 /** Parse the `key=value` newline-delimited strings get_escrow/get_message return. */
