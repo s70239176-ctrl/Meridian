@@ -24,6 +24,16 @@ import { privateKeyToAccount } from "viem/accounts";
 import { arcTestnet } from "viem/chains";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+// Plain `node` does not read .env files — only Vite's dev server does that
+// for the app itself. Load it here too, so this script works the same way
+// whether you remember `--env-file` or not.
+try {
+  process.loadEnvFile(join(root, ".env"));
+} catch {
+  // no .env file yet — fall through to the explicit "not set" errors below
+}
+
 const contractPath = join(root, "contracts", "Vault.sol");
 const source = readFileSync(contractPath, "utf8");
 
