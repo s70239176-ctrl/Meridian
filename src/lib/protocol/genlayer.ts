@@ -62,14 +62,39 @@ const TERMINAL_FAILURE_STATUSES = new Set<TransactionStatus>([
   TransactionStatus.LEADER_TIMEOUT,
 ]);
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
- * Write, then poll until the network actually reaches FINALIZED — not just
- * ACCEPTED (the optimistic pre-appeal-window state). SettlementOutbox.record
- * is only called once the adjudicate transaction is past its appeal window,
- * so anything short of FINALIZED here is genuinely not done yet, not a
- * failure. Polls for up to ~10 minutes; only a real terminal status (a
- * canceled or timed-out round) fails fast.
+ * Poll a transaction until the network actually reaches FINALIZED — not just
+ * ACCEPTED (the optimistic pre-appeal-window state). Polls for up to ~10
+ * minutes; only a real terminal status (a canceled or timed-out round) fails
+ * fast.
  */
+async function pollUntilFinalized(hash: Hash) {
+  const c = getClient();
+  const intervalMs = 3000;
+  const maxAttempts = 200; // ~10 minutes total
+  let last: Awaited<ReturnType<Client["getTransaction"]>> | undefined;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    last = await c.getTransaction({ hash });
+    if (last.statusName === TransactionStatus.FINALIZED) {
+      return last;
+    }
+    if (last.statusName && TERMINAL_FAILURE_STATUSES.has(last.statusName)) {
+      throw new Error(
+        `GenLayer transaction ended without finalizing (status: ${last.statusName}, tx ${hash}) — check ${genlayerExplorerTxUrl(hash)}`,
+      );
+    }
+    await sleep(intervalMs);
+  }
+  throw new Error(
+    `GenLayer transaction is still ${last?.statusName ?? "pending"} after ~10 minutes (tx ${hash}) — it may still finalize; check ${genlayerExplorerTxUrl(hash)}`,
+  );
+}
+
+/** Write, then wait for that transaction (only) to finalize. */
 async function writeAndWait(address: string, functionName: string, args: CalldataEncodable[]) {
   const c = getClient();
   const hash = (await c.writeContract({
@@ -78,25 +103,30 @@ async function writeAndWait(address: string, functionName: string, args: Calldat
     args,
     value: 0n,
   })) as Hash;
+  const receipt = await pollUntilFinalized(hash);
+  return { hash, receipt };
+}
 
-  const intervalMs = 3000;
-  const maxAttempts = 200; // ~10 minutes total
-  let last: Awaited<ReturnType<Client["getTransaction"]>> | undefined;
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    last = await c.getTransaction({ hash });
-    if (last.statusName === TransactionStatus.FINALIZED) {
-      return { hash, receipt: last };
-    }
-    if (last.statusName && TERMINAL_FAILURE_STATUSES.has(last.statusName)) {
-      throw new Error(
-        `GenLayer transaction ended without finalizing (status: ${last.statusName}, tx ${hash}) — check ${genlayerExplorerTxUrl(hash)}`,
-      );
-    }
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+/**
+ * `adjudicate()` calls `outbox.emit(on="finalized").record(...)` — this
+ * schedules SettlementOutbox.record as a SEPARATE, downstream transaction
+ * that only gets created once `adjudicate` itself finalizes. It is not part
+ * of the same transaction and has its own independent finalization delay,
+ * so the settlement message genuinely does not exist yet the instant
+ * `adjudicate` finalizes. Wait for that child transaction too, so that by
+ * the time this resolves, "Relay settlement" can actually succeed.
+ */
+async function waitForTriggeredSettlement(parentHash: Hash): Promise<void> {
+  const c = getClient();
+  let triggered: Hash[] = [];
+  for (let attempt = 0; attempt < 30; attempt++) {
+    triggered = (await c.getTriggeredTransactionIds({ hash: parentHash })) as Hash[];
+    if (triggered.length > 0) break;
+    await sleep(2000);
   }
-  throw new Error(
-    `GenLayer transaction is still ${last?.statusName ?? "pending"} after ~10 minutes (tx ${hash}) — it may still finalize; check ${genlayerExplorerTxUrl(hash)}`,
-  );
+  for (const childHash of triggered) {
+    await pollUntilFinalized(childHash);
+  }
 }
 
 /**
@@ -209,6 +239,10 @@ export const adjudicateOnGenlayer = createServerFn({ method: "POST" })
           `adjudicate finalized (tx ${adjudicated.hash}) but returned an unrecognized verdict "${verdict}" — check ${genlayerExplorerTxUrl(adjudicated.hash)}`,
         );
       }
+      // Wait for the downstream SettlementOutbox.record call this triggers
+      // to finalize too, so "Relay settlement" works immediately after this
+      // returns instead of failing with "no finalized message yet".
+      await waitForTriggeredSettlement(adjudicated.hash);
       return {
         ok: true,
         verdict,
