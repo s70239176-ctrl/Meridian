@@ -54,7 +54,22 @@ function requireAddress(name: string, value: string | undefined): string {
   return value;
 }
 
-/** Write, then poll until the network has decided the transaction. */
+/** Statuses that mean the transaction is truly done for and will never reach FINALIZED. */
+const TERMINAL_FAILURE_STATUSES = new Set<TransactionStatus>([
+  TransactionStatus.CANCELED,
+  TransactionStatus.UNDETERMINED,
+  TransactionStatus.VALIDATORS_TIMEOUT,
+  TransactionStatus.LEADER_TIMEOUT,
+]);
+
+/**
+ * Write, then poll until the network actually reaches FINALIZED — not just
+ * ACCEPTED (the optimistic pre-appeal-window state). SettlementOutbox.record
+ * is only called once the adjudicate transaction is past its appeal window,
+ * so anything short of FINALIZED here is genuinely not done yet, not a
+ * failure. Polls for up to ~10 minutes; only a real terminal status (a
+ * canceled or timed-out round) fails fast.
+ */
 async function writeAndWait(address: string, functionName: string, args: CalldataEncodable[]) {
   const c = getClient();
   const hash = (await c.writeContract({
@@ -63,14 +78,25 @@ async function writeAndWait(address: string, functionName: string, args: Calldat
     args,
     value: 0n,
   })) as Hash;
-  const receipt = await c.waitForTransactionReceipt({
-    hash,
-    status: TransactionStatus.FINALIZED,
-  });
-  if (receipt.statusName !== TransactionStatus.FINALIZED) {
-    throw new Error(`GenLayer transaction did not finalize: ${receipt.statusName ?? "unknown status"}`);
+
+  const intervalMs = 3000;
+  const maxAttempts = 200; // ~10 minutes total
+  let last: Awaited<ReturnType<Client["getTransaction"]>> | undefined;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    last = await c.getTransaction({ hash });
+    if (last.statusName === TransactionStatus.FINALIZED) {
+      return { hash, receipt: last };
+    }
+    if (last.statusName && TERMINAL_FAILURE_STATUSES.has(last.statusName)) {
+      throw new Error(
+        `GenLayer transaction ended without finalizing (status: ${last.statusName}, tx ${hash}) — check ${genlayerExplorerTxUrl(hash)}`,
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
-  return { hash, receipt };
+  throw new Error(
+    `GenLayer transaction is still ${last?.statusName ?? "pending"} after ~10 minutes (tx ${hash}) — it may still finalize; check ${genlayerExplorerTxUrl(hash)}`,
+  );
 }
 
 function decodedReturnValue(receipt: Awaited<ReturnType<Client["waitForTransactionReceipt"]>>): string {

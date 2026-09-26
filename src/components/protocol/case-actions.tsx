@@ -153,7 +153,8 @@ export function CaseActions({ escrow }: { escrow: Escrow }) {
           <p className="text-sm text-fg">Adjudicating…</p>
           <p className="text-sm text-muted">
             GenLayer's leader is fetching evidence and prompting its model; validators are independently re-running
-            the same check. This can take a moment.
+            the same check, then the transaction has to clear its appeal window before it's finalized. This can take
+            a few minutes — leave this page open.
           </p>
         </div>
       )}
