@@ -21,7 +21,7 @@ becoming the final word.
 
 ## Live demo
 
-`<add your Vercel/hosted app URL here>`
+https://meridian-relayer.vercel.app/
 
 ## Contract details
 
@@ -32,9 +32,9 @@ becoming the final word.
 
 - Arc Testnet RPC: `https://rpc.testnet.arc.network`
 - GenLayer Studio RPC: `https://studio.genlayer.com/api`
-- Vault address: `<paste VITE_VAULT_ADDRESS after deploying>`
-- MeridianAdjudicator address: `<paste VITE_MERIDIAN_ADJUDICATOR after deploying>`
-- SettlementOutbox address: `<paste VITE_MERIDIAN_OUTBOX after deploying>`
+- Vault address: [`0x8c68326d672c895a9ba5bc8848643df101965f00`](https://testnet.arcscan.app/address/0x8c68326d672c895a9ba5bc8848643df101965f00)
+- MeridianAdjudicator address: [`0x672495FF6Ee81Af065fAD6d20Ae9eFD26d3a897d`](https://explorer-studio.genlayer.com/address/0x672495FF6Ee81Af065fAD6d20Ae9eFD26d3a897d)
+- SettlementOutbox address: [`0xd5Ef7Ac3b1b1C7CC245eF42c6D3B359A241acF54`](https://explorer-studio.genlayer.com/address/0xd5Ef7Ac3b1b1C7CC245eF42c6D3B359A241acF54)
 
 Arc's native currency **is** USDC, but accounted with 18 decimals (ether-style)
 at the native/`msg.value` layer — a separate ERC-20 view of the same balance
