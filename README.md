@@ -32,17 +32,23 @@ https://meridian-relayer.vercel.app/
 
 - Arc Testnet RPC: `https://rpc.testnet.arc.network`
 - GenLayer Studio RPC: `https://studio.genlayer.com/api`
-- Vault address: `<redeploy pending — see note below>`
-- MeridianAdjudicator address: `<redeploy pending — see note below>`
-- SettlementOutbox address: `<redeploy pending — see note below>`
+- Vault address: [`0xa012e6ce7d96c82399d43e12b9af1265178edfa5`](https://testnet.arcscan.app/address/0xa012e6ce7d96c82399d43e12b9af1265178edfa5)
+- MeridianAdjudicator address: [`0x92f4cceA07B1168273Fb44eD607835e622a2C43F`](https://explorer-studio.genlayer.com/address/0x92f4cceA07B1168273Fb44eD607835e622a2C43F)
+- SettlementOutbox address: [`0x41eBd14D0ec72C9bf186A636828BDD4432162961`](https://explorer-studio.genlayer.com/address/0x41eBd14D0ec72C9bf186A636828BDD4432162961)
 
 > **A steward review identified a real fund-safety issue** (see "Known
-> limitations" below for the full writeup) and the fix changes both
-> contracts' function signatures (`create_escrow` and `settle` each take one
-> additional parameter). The addresses above need a fresh deploy-and-bind
-> pass (README → "How to run locally") before they're valid again — the
-> previously-deployed contracts predate this fix and should be treated as
-> retired, not reused.
+> limitations" below for the full writeup): the vault's and GenLayer's escrow
+> ids were independently tracked rather than one canonical identifier, so a
+> mismatched pairing could apply one case's verdict to a different case's
+> locked funds. Fixed by making the vault's id the single identifier
+> everywhere and verifying the finalized message's fields against the vault's
+> own on-chain state before ever settling (`src/lib/chain/vault.ts`'s
+> `verifyMessageAgainstVaultEscrow`, tested in `vault.test.ts`). The addresses
+> above are the redeployed contracts, verified on-chain to use the new
+> `create_escrow(vault_escrow_id, ...)` and `settle(..., expectedAmount)`
+> signatures — confirmed via a real `create_escrow` call
+> ([tx](https://explorer-studio.genlayer.com/tx/0x2e85f2bda9aa388dab686527e389216bb3d443a1f31d2425d691b6a2df156574))
+> whose return value echoes back the exact canonical id it was given.
 
 Arc's native currency **is** USDC, but accounted with 18 decimals (ether-style)
 at the native/`msg.value` layer — a separate ERC-20 view of the same balance
