@@ -32,9 +32,22 @@ https://meridian-relayer.vercel.app/
 
 - Arc Testnet RPC: `https://rpc.testnet.arc.network`
 - GenLayer Studio RPC: `https://studio.genlayer.com/api`
-- Vault address: [`0x8c68326d672c895a9ba5bc8848643df101965f00`](https://testnet.arcscan.app/address/0x8c68326d672c895a9ba5bc8848643df101965f00)
-- MeridianAdjudicator address: [`0x672495FF6Ee81Af065fAD6d20Ae9eFD26d3a897d`](https://explorer-studio.genlayer.com/address/0x672495FF6Ee81Af065fAD6d20Ae9eFD26d3a897d)
-- SettlementOutbox address: [`0xd5Ef7Ac3b1b1C7CC245eF42c6D3B359A241acF54`](https://explorer-studio.genlayer.com/address/0xd5Ef7Ac3b1b1C7CC245eF42c6D3B359A241acF54)
+- Vault address: `<redeploy pending — see note below>`
+- MeridianAdjudicator address: `<redeploy pending — see note below>`
+- SettlementOutbox address: `<redeploy pending — see note below>`
+
+> **A steward review identified a real fund-safety issue** (see "Known
+> limitations" below for the full writeup) and the fix changes both
+> contracts' function signatures (`create_escrow` and `settle` each take one
+> additional parameter). The addresses above need a fresh deploy-and-bind
+> pass (README → "How to run locally") before they're valid again — the
+> previously-deployed contracts predate this fix and should be treated as
+> retired, not reused.
+
+Arc's native currency **is** USDC, but accounted with 18 decimals (ether-style)
+at the native/`msg.value` layer — a separate ERC-20 view of the same balance
+uses 6 decimals. See [`circlefin/arc-node` #95](https://github.com/circlefin/arc-node/issues/95)
+and [#453](https://github.com/circlefin/arc-node/issues/453).
 
 Arc's native currency **is** USDC, but accounted with 18 decimals (ether-style)
 at the native/`msg.value` layer — a separate ERC-20 view of the same balance
@@ -143,6 +156,23 @@ Paste these into "New vault" to test quickly:
 
 ## Known limitations
 
+- **Resolved via steward review: one canonical case identifier, verified
+  before settlement.** Previously, the vault's `bytes32` escrow id and
+  GenLayer's own auto-incrementing `escrow_id` were two independently-tracked
+  identifiers, linked only by client-side bookkeeping — the relayer trusted
+  whatever `vaultEscrowId` a caller supplied when settling, with nothing
+  on-chain tying a specific GenLayer verdict to a specific vault deposit. That
+  meant a mismatched or malicious pairing could, in principle, apply one
+  case's verdict to a different case's locked funds. Fixed by making the
+  vault's id the canonical identifier everywhere: it's now passed into
+  `create_escrow` and used as GenLayer's own storage key (so the two systems
+  share one identity by construction, not by a mapping that could drift), the
+  relayer cross-checks the finalized message's vault/amount/recipient against
+  the vault's own on-chain record before ever signing a `settle()` call
+  (`src/lib/chain/vault.ts`'s `verifyMessageAgainstVaultEscrow`), and
+  `settle()` itself re-checks the amount as a second, independent guard. See
+  `src/lib/chain/vault.test.ts` for tests proving a verdict cannot be applied
+  to a mismatched escrow or replayed after settlement.
 - **AI judgment is not deterministic in the strict sense.** Verdicts come
   from an LLM reading real web evidence; consensus (independent validators
   agreeing via NLP) catches disagreement, but a genuinely ambiguous case can

@@ -4,8 +4,8 @@ import type { Escrow, Evidence } from "./types.ts";
 
 /**
  * A thin local index of cases this browser has created — NOT the source of
- * truth. Every field beyond the pointer (id/vaultEscrowId/genlayerEscrowId)
- * is populated from real reads (Vault.sol, MeridianAdjudicator.get_escrow,
+ * truth. Every field beyond the pointer (id/onChainId) is populated from
+ * real reads (Vault.sol, MeridianAdjudicator.get_escrow,
  * SettlementOutbox.get_message) and real transaction results, never
  * fabricated here. Losing this list loses the ability to easily find your
  * own past cases in this browser — it does not affect funds or verdicts,

@@ -24,6 +24,7 @@ export function CaseActions({ escrow }: { escrow: Escrow }) {
     try {
       const created = await createEscrowOnGenlayer({
         data: {
+          onChainId: escrow.onChainId,
           payer: escrow.payer,
           payee: escrow.payee,
           sourceChainEip155: CHAIN_META[escrow.sourceChain].eip155,
@@ -38,7 +39,7 @@ export function CaseActions({ escrow }: { escrow: Escrow }) {
         toast.error(created.error);
         return;
       }
-      store.updateEscrow(escrow.id, { genlayerEscrowId: created.genlayerEscrowId, createTx: created.createTx });
+      store.updateEscrow(escrow.id, { registeredOnGenlayer: true, createTx: created.createTx });
       toast.message("Registered on GenLayer");
     } finally {
       setBusy(false);
@@ -46,7 +47,7 @@ export function CaseActions({ escrow }: { escrow: Escrow }) {
   }
 
   async function runAdjudication() {
-    if (!escrow.genlayerEscrowId) {
+    if (!escrow.registeredOnGenlayer) {
       toast.error("This case was never registered on GenLayer — cannot adjudicate.");
       return;
     }
@@ -58,7 +59,7 @@ export function CaseActions({ escrow }: { escrow: Escrow }) {
     store.updateEscrow(escrow.id, { status: "adjudicating" });
     try {
       const result = await adjudicateOnGenlayer({
-        data: { genlayerEscrowId: escrow.genlayerEscrowId, evidenceUrls },
+        data: { onChainId: escrow.onChainId, evidenceUrls },
       });
       if (!result.ok) {
         toast.error(result.error);
@@ -80,12 +81,12 @@ export function CaseActions({ escrow }: { escrow: Escrow }) {
   }
 
   async function runRelay() {
-    if (!escrow.genlayerEscrowId) return;
+    if (!escrow.registeredOnGenlayer) return;
     setBusy(true);
     store.updateEscrow(escrow.id, { status: "relaying" });
     try {
       const result = await relaySettlement({
-        data: { genlayerEscrowId: escrow.genlayerEscrowId, vaultEscrowId: escrow.vaultEscrowId },
+        data: { onChainId: escrow.onChainId },
       });
       if (!result.ok) {
         toast.error(result.error);
@@ -120,7 +121,7 @@ export function CaseActions({ escrow }: { escrow: Escrow }) {
 
   return (
     <div className="space-y-4">
-      {escrow.status === "locked" && !escrow.genlayerEscrowId && (
+      {escrow.status === "locked" && !escrow.registeredOnGenlayer && (
         <div className="space-y-3 rounded-xl border border-dashed border-fg/20 bg-surface p-4 shadow-[var(--shadow-border)]">
           <p className="text-sm text-fg">Not registered on GenLayer yet</p>
           <p className="text-sm leading-relaxed text-muted">
@@ -132,7 +133,7 @@ export function CaseActions({ escrow }: { escrow: Escrow }) {
         </div>
       )}
 
-      {escrow.status === "locked" && escrow.genlayerEscrowId && (
+      {escrow.status === "locked" && escrow.registeredOnGenlayer && (
         <div className="space-y-3 rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
           <p className="text-sm text-fg">Run adjudication</p>
           <p className="text-sm leading-relaxed text-muted">

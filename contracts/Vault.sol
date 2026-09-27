@@ -59,12 +59,21 @@ contract MeridianVault {
 
     /// @notice Pay out `escrowId` per a finalized GenLayer verdict. Only the
     /// configured relayer may call this — it is expected to have already
-    /// read the real verdict from settlement_outbox.get_message(escrowId).
-    function settle(bytes32 escrowId, Verdict verdict, uint16 payeeBps) external {
+    /// read the real verdict from settlement_outbox.get_message(escrowId) AND
+    /// cross-checked its fields against this contract's own escrow record
+    /// (see src/lib/chain/relay.server.ts). `expectedAmount` is that same
+    /// on-chain amount, passed back in and re-checked here: a second,
+    /// independent guard so a relayer bug that resolves the wrong escrowId
+    /// (settling escrow B with a message meant for escrow A) fails loudly
+    /// instead of silently paying the wrong amount. payer/payee are never
+    /// taken as parameters — they always come from this contract's own
+    /// storage, so a caller cannot redirect a payout to an arbitrary address.
+    function settle(bytes32 escrowId, Verdict verdict, uint16 payeeBps, uint256 expectedAmount) external {
         require(msg.sender == relayer, "only relayer");
         require(payeeBps <= 10000, "bad bps");
         Escrow storage e = escrows[escrowId];
         require(e.status == Status.Locked, "not locked");
+        require(e.amount == expectedAmount, "amount mismatch, wrong escrow?");
         e.status = Status.Settled;
 
         uint256 payeeAmount = verdict == Verdict.ReleaseToPayee

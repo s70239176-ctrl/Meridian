@@ -26,6 +26,7 @@ export const VAULT_ABI = [
       { name: "escrowId", type: "bytes32" },
       { name: "verdict", type: "uint8" },
       { name: "payeeBps", type: "uint16" },
+      { name: "expectedAmount", type: "uint256" },
     ],
     outputs: [],
     stateMutability: "nonpayable",
@@ -112,7 +113,14 @@ export async function depositToVault(
   return hash;
 }
 
-export async function getVaultEscrow(vault: Address, escrowId: Hash) {
+export type VaultEscrowRecord = {
+  payer: string;
+  payee: string;
+  amount: bigint;
+  status: (typeof VAULT_STATUS_LABEL)[number];
+};
+
+export async function getVaultEscrow(vault: Address, escrowId: Hash): Promise<VaultEscrowRecord> {
   const [payer, payee, amount, status] = await arcPublicClient.readContract({
     address: vault,
     abi: VAULT_ABI,
@@ -120,4 +128,46 @@ export async function getVaultEscrow(vault: Address, escrowId: Hash) {
     args: [escrowId],
   });
   return { payer, payee, amount, status: VAULT_STATUS_LABEL[status] };
+}
+
+/**
+ * Cross-check a GenLayer settlement message against the vault's own on-chain
+ * escrow record BEFORE ever signing a settle() transaction. This is the
+ * actual enforcement point for "one canonical id": even though create_escrow
+ * and deposit() now share the same id by construction, this function is
+ * defense-in-depth against any bug that fetches the right message but the
+ * wrong escrow (or vice versa) — a mismatch here means the verdict does NOT
+ * belong to this specific locked deposit, and must never be applied to it.
+ * Pure — no network calls — so it's directly unit-testable.
+ */
+export function verifyMessageAgainstVaultEscrow(input: {
+  escrow: VaultEscrowRecord;
+  configuredVault: string;
+  messageVault: string;
+  messageAmount: string;
+  messageRecipient: string;
+}): { ok: true } | { ok: false; error: string } {
+  if (input.escrow.status !== "locked") {
+    return { ok: false, error: `escrow is not locked on-chain (status: ${input.escrow.status}) — already settled or never deposited` };
+  }
+  if (input.messageVault.toLowerCase() !== input.configuredVault.toLowerCase()) {
+    return { ok: false, error: "message's vault address does not match the vault this relayer is configured for" };
+  }
+  let expectedAmount: bigint;
+  try {
+    expectedAmount = usdcToNativeValue(input.messageAmount);
+  } catch {
+    return { ok: false, error: `message amount "${input.messageAmount}" is not a valid decimal amount` };
+  }
+  if (expectedAmount !== input.escrow.amount) {
+    return {
+      ok: false,
+      error: `message amount (${input.messageAmount} USDC) does not match the amount actually locked for this escrow — refusing to settle a mismatched escrow`,
+    };
+  }
+  const recipient = input.messageRecipient.toLowerCase();
+  if (recipient !== input.escrow.payer.toLowerCase() && recipient !== input.escrow.payee.toLowerCase()) {
+    return { ok: false, error: "message recipient is neither this escrow's payer nor payee" };
+  }
+  return { ok: true };
 }

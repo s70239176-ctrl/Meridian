@@ -23,13 +23,18 @@ Then on the outbox, as its deployer:
 
     set_adjudicator(<this contract address>)
 
-Open a case (amount is raw token units, as a decimal string):
+Open a case (amount is raw token units, as a decimal string). `vault_escrow_id`
+is the canonical case identifier — the SAME bytes32 id (as a 0x-prefixed
+66-char hex string) the vault contract keys its deposit on. Using one shared
+id end to end (vault, adjudicator, outbox) is what lets the relayer look up
+exactly the right vault entry for a given verdict, instead of trusting a
+second, independently-supplied id:
 
-    create_escrow <payer> <payee> <eip155:1> <vault> <USDC> <amount> <spec> <equivalence>
+    create_escrow <vault_escrow_id> <payer> <payee> <eip155:1> <vault> <USDC> <amount> <spec> <equivalence>
 
 Judge it (evidence URLs separated by newlines):
 
-    adjudicate <escrow_id> <evidence_blob>
+    adjudicate <vault_escrow_id> <evidence_blob>
 """
 
 from genlayer import *
@@ -99,10 +104,13 @@ def _normalize(raw: object) -> dict:
     return {"verdict": verdict, "payee_bps": bps, "reasoning": reasoning}
 
 
+def _is_bytes32_hex(value: str) -> bool:
+    return value.startswith("0x") and len(value) == 66
+
+
 class MeridianAdjudicator(gl.Contract):
     owner: Address
     outbox: Address
-    next_id: str
     escrows: TreeMap[str, Escrow]
 
     def __init__(self, outbox: str):
@@ -110,11 +118,11 @@ class MeridianAdjudicator(gl.Contract):
             raise gl.vm.UserError("outbox must be a 20-byte hex address")
         self.owner = gl.message.sender_address
         self.outbox = Address(outbox)
-        self.next_id = "1"
 
     @gl.public.write
     def create_escrow(
         self,
+        vault_escrow_id: str,
         payer: str,
         payee: str,
         source_chain: str,
@@ -124,6 +132,16 @@ class MeridianAdjudicator(gl.Contract):
         spec: str,
         equivalence: str,
     ) -> str:
+        # vault_escrow_id is the canonical id: the exact bytes32 key the vault
+        # contract locked this deposit under. Adopting it here (instead of an
+        # internally generated id) is what lets the relayer later fetch
+        # get_message(vault_escrow_id) and know — by construction, not by
+        # trusting a client-supplied mapping — that the message belongs to
+        # that specific vault entry.
+        if not _is_bytes32_hex(vault_escrow_id):
+            raise gl.vm.UserError("vault_escrow_id must be a 32-byte hex id (0x + 64 hex chars)")
+        if vault_escrow_id in self.escrows:
+            raise gl.vm.UserError("this vault_escrow_id has already been registered")
         sender = gl.message.sender_address
         if sender != self.owner and _hex(sender).lower() not in (payer.lower(), payee.lower()):
             raise gl.vm.UserError("only owner, payer, or payee can open an escrow")
@@ -142,9 +160,7 @@ class MeridianAdjudicator(gl.Contract):
         if not amount.isdigit() or int(amount) <= 0:
             raise gl.vm.UserError("amount must be a positive integer in raw token units")
 
-        escrow_id = self.next_id
-        self.next_id = str(int(escrow_id) + 1)
-        self.escrows[escrow_id] = Escrow(
+        self.escrows[vault_escrow_id] = Escrow(
             payer=Address(payer),
             payee=Address(payee),
             source_chain=source_chain,
@@ -158,7 +174,7 @@ class MeridianAdjudicator(gl.Contract):
             payee_bps="",
             reasoning="",
         )
-        return escrow_id
+        return vault_escrow_id
 
     @gl.public.write
     def adjudicate(self, escrow_id: str, evidence_blob: str) -> str:

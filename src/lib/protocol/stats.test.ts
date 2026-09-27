@@ -12,7 +12,7 @@ function fixture(overrides: Partial<Escrow>): Escrow {
     equivalence: "equivalence",
     sourceChain: "arc",
     vaultAddress: "0x1111111111111111111111111111111111111111",
-    vaultEscrowId: "0xaa",
+    onChainId: "0xaa",
     asset: "USDC",
     amount: "100",
     payer: "0x2222222222222222222222222222222222222222",
@@ -21,6 +21,7 @@ function fixture(overrides: Partial<Escrow>): Escrow {
     lockTx: "0xlock",
     evidence: [],
     status: "locked",
+    registeredOnGenlayer: true,
     ...overrides,
   };
 }

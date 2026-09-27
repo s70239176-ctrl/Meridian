@@ -172,6 +172,13 @@ export function parseKeyValueRecord(text: string): Record<string, string> {
 }
 
 const CreateEscrowInput = z.object({
+  // The canonical case id — the exact bytes32 id (0x + 64 hex chars) the
+  // vault contract locked the deposit under. Passed straight through as
+  // create_escrow's storage key, instead of letting GenLayer mint its own
+  // independent id, so the vault deposit and the GenLayer case are the same
+  // identity by construction, not by a client-side mapping that could drift
+  // or be spoofed.
+  onChainId: z.string().regex(/^0x[0-9a-fA-F]{64}$/, "onChainId must be a 32-byte hex id"),
   payer: z.string(),
   payee: z.string(),
   sourceChainEip155: z.string(),
@@ -183,7 +190,7 @@ const CreateEscrowInput = z.object({
 });
 
 export type CreateEscrowResult =
-  | { ok: true; genlayerEscrowId: string; createTx: string; explorerUrl: string }
+  | { ok: true; createTx: string; explorerUrl: string }
   | { ok: false; error: string };
 
 /** Real MeridianAdjudicator.create_escrow() call. */
@@ -193,6 +200,7 @@ export const createEscrowOnGenlayer = createServerFn({ method: "POST" })
     try {
       const adjudicator = requireAddress("VITE_MERIDIAN_ADJUDICATOR", import.meta.env.VITE_MERIDIAN_ADJUDICATOR);
       const created = await writeAndWait(adjudicator, "create_escrow", [
+        data.onChainId,
         data.payer,
         data.payee,
         data.sourceChainEip155,
@@ -202,20 +210,28 @@ export const createEscrowOnGenlayer = createServerFn({ method: "POST" })
         data.spec,
         data.equivalence,
       ]);
-      const genlayerEscrowId = decodedReturnValue(created.receipt);
-      if (!genlayerEscrowId) {
+      const echoedId = decodedReturnValue(created.receipt);
+      if (!echoedId) {
         throw new Error(
           `create_escrow finalized (tx ${created.hash}) but its return value could not be decoded — check ${genlayerExplorerTxUrl(created.hash)}`,
         );
       }
-      return { ok: true, genlayerEscrowId, createTx: created.hash, explorerUrl: genlayerExplorerTxUrl(created.hash) };
+      if (echoedId.toLowerCase() !== data.onChainId.toLowerCase()) {
+        // Should be unreachable (the contract stores exactly what it was
+        // given), but if it ever happened, treating it as success would mean
+        // trusting a case id GenLayer did NOT actually register.
+        throw new Error(
+          `create_escrow echoed a different id (${echoedId}) than requested (${data.onChainId}) — refusing to proceed`,
+        );
+      }
+      return { ok: true, createTx: created.hash, explorerUrl: genlayerExplorerTxUrl(created.hash) };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
   });
 
 const AdjudicateInput = z.object({
-  genlayerEscrowId: z.string(),
+  onChainId: z.string(),
   evidenceUrls: z.array(z.string().max(500)).min(1).max(4),
 });
 
@@ -230,7 +246,7 @@ export const adjudicateOnGenlayer = createServerFn({ method: "POST" })
     try {
       const adjudicator = requireAddress("VITE_MERIDIAN_ADJUDICATOR", import.meta.env.VITE_MERIDIAN_ADJUDICATOR);
       const adjudicated = await writeAndWait(adjudicator, "adjudicate", [
-        data.genlayerEscrowId,
+        data.onChainId,
         data.evidenceUrls.join("\n"),
       ]);
       const verdict = decodedReturnValue(adjudicated.receipt);
@@ -254,7 +270,7 @@ export const adjudicateOnGenlayer = createServerFn({ method: "POST" })
     }
   });
 
-const EscrowIdInput = z.object({ genlayerEscrowId: z.string() });
+const EscrowIdInput = z.object({ onChainId: z.string() });
 
 export type GetEscrowResult =
   | { ok: true; record: Record<string, string> }
@@ -270,7 +286,7 @@ export const getEscrowOnGenlayer = createServerFn({ method: "GET" })
       const text = (await c.readContract({
         address: adjudicator as `0x${string}`,
         functionName: "get_escrow",
-        args: [data.genlayerEscrowId],
+        args: [data.onChainId],
       })) as string;
       if (!text) throw new Error("unknown escrow on GenLayer");
       return { ok: true, record: parseKeyValueRecord(text) };
@@ -294,7 +310,7 @@ export const getOutboxMessage = createServerFn({ method: "GET" })
       const text = (await c.readContract({
         address: outbox as `0x${string}`,
         functionName: "get_message",
-        args: [data.genlayerEscrowId],
+        args: [data.onChainId],
       })) as string;
       if (!text) return { ok: true, hasMessage: false };
       return { ok: true, hasMessage: true, record: parseKeyValueRecord(text) };

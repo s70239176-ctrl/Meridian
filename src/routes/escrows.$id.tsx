@@ -77,11 +77,11 @@ function CasePage() {
             <p className="mt-2 text-sm leading-relaxed text-muted">{escrow.equivalence}</p>
           </section>
 
-          {escrow.genlayerEscrowId ? (
+          {escrow.registeredOnGenlayer ? (
             <section>
               <h2 className="font-display text-2xl tracking-tight text-fg">GenLayer case</h2>
               <p className="mt-2 text-sm leading-relaxed text-muted">
-                Escrow #{escrow.genlayerEscrowId} on the real deployed MeridianAdjudicator contract.
+                Escrow {shortAddr(escrow.onChainId, 6)} on the real deployed MeridianAdjudicator contract.
                 {escrow.createTx ? (
                   <>
                     {" "}

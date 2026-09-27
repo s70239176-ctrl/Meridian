@@ -10,7 +10,7 @@ import { deployment } from "@/lib/protocol/deployment";
 import { useEscrowStore } from "@/lib/protocol/store";
 import { CHAIN_META } from "@/lib/protocol/types";
 import { connectWallet, arcPublicClient, type ConnectedWallet } from "@/lib/chain/wallet";
-import { depositToVault, vaultEscrowId } from "@/lib/chain/vault";
+import { depositToVault, vaultEscrowId as computeOnChainId } from "@/lib/chain/vault";
 import { shortAddr } from "@/lib/protocol/format";
 
 export const Route = createFileRoute("/new")({ component: NewEscrow });
@@ -67,12 +67,14 @@ function NewEscrow() {
 
     setSubmitting(true);
     const caseId = crypto.randomUUID();
-    const onChainEscrowId = vaultEscrowId(caseId);
+    // The one canonical id, generated once and used unchanged for both the
+    // vault deposit and the GenLayer case — see types.ts's Escrow.onChainId.
+    const onChainId = computeOnChainId(caseId);
 
     try {
       setStep("depositing");
       const depositTx = await depositToVault(wallet.walletClient, vault as `0x${string}`, {
-        escrowId: onChainEscrowId,
+        escrowId: onChainId,
         payee: payee as `0x${string}`,
         amountUsdc: amount,
       });
@@ -82,6 +84,7 @@ function NewEscrow() {
       setStep("registering");
       const created = await createEscrowOnGenlayer({
         data: {
+          onChainId,
           payer: wallet.address,
           payee,
           sourceChainEip155: CHAIN_META.arc.eip155,
@@ -101,7 +104,7 @@ function NewEscrow() {
         equivalence,
         sourceChain: "arc",
         vaultAddress: vault,
-        vaultEscrowId: onChainEscrowId,
+        onChainId,
         asset: "USDC",
         amount,
         payer: wallet.address,
@@ -112,7 +115,7 @@ function NewEscrow() {
           ? [{ id: `ev-${caseId}-1`, submittedBy: "payee", label: "Opening evidence", url: evidenceUrl, note: evidenceNote, at: Date.now() }]
           : [],
         status: "locked",
-        genlayerEscrowId: created.ok ? created.genlayerEscrowId : undefined,
+        registeredOnGenlayer: created.ok,
         createTx: created.ok ? created.createTx : undefined,
       });
 
