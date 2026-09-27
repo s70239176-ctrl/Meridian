@@ -1,46 +1,81 @@
 # Meridian
 
-Meridian is a cross-chain **resolution layer** for escrows: real funds are
-locked in a real vault contract on the source chain (currently
-[Arc Testnet](https://docs.arc.io)), and [GenLayer](https://genlayer.com) — a
-blockchain whose Intelligent Contracts run LLM-backed validator consensus —
-only **judges** whether the deal's spec was met. GenLayer never touches the
-funds. Once a verdict is final, GenLayer's own contract emits a settlement
-*message*; a relayer reads that message and tells the vault who gets paid.
-Meridian itself never moves money — it decides who should be paid, and lets
-the vault do the paying.
+## Project summary
 
-**Everything here is real — no mocked or simulated state.** Depositing,
-adjudicating, and settling are all real transactions on Arc Testnet and
-GenLayer Studio, driven by a real connected wallet.
+Cross-chain escrows need a judge that isn't also the custodian: if the chain
+holding the funds also decides the dispute, every appeal is a custody event.
+Meridian solves this by splitting the two jobs. Real funds are locked in
+[`Vault.sol`](contracts/Vault.sol), a Solidity contract on Arc Testnet
+(Circle's USDC-native L1) — Meridian itself never holds the money. The case is
+judged by a real, deployed [GenLayer](https://genlayer.com) Intelligent
+Contract, which fetches the submitted evidence and reaches a verdict through
+genuine LLM-backed leader/validator consensus (`gl.eq_principle.prompt_comparative`),
+not a fixed rule or a single model call taken on faith. Once GenLayer
+finalizes, a relayer reads its real settlement message and submits it to the
+vault, which pays out — the only step where money moves. GenLayer's advantage
+here is exactly this: a natural-language spec and an "equivalence principle"
+replace a rigid on-chain oracle format, so the dispute can turn on meaning
+("was the brief substantively complete?") instead of a boolean flag, while
+consensus across independent validators keeps any single model's mistake from
+becoming the final word.
 
-## The real flow
+## Live demo
 
-1. **Connect a wallet** (any injected wallet, e.g. MetaMask) on the "New
-   vault" page. The app prompts it to add/switch to Arc Testnet if needed.
-2. **Deposit** — submitting the form sends a real transaction to
-   [`contracts/Vault.sol`](contracts/Vault.sol), a deployed Solidity contract
-   that locks the deposited USDC (Arc's native currency) until settled.
-3. **Register on GenLayer** — the app then calls the real, deployed
-   `MeridianAdjudicator.create_escrow()` on GenLayer Studio with the same
-   case facts.
-4. **Adjudicate** — from the case page, "Run adjudication" calls the real
-   `adjudicate()` write. GenLayer's leader fetches your evidence URLs and
-   prompts its model; every validator independently re-runs the same check
-   and `gl.eq_principle.prompt_comparative` — GenLayer's real consensus
-   primitive — decides via NLP whether their answers agree. This is genuine
-   leader/validator consensus, not a local heuristic or canned response.
-5. **Relay settlement** — once finalized, GenLayer's contract has already
-   written a message to `contracts/settlement_outbox.py`. Clicking "Relay
-   settlement" reads that real message and submits it to `Vault.sol`, which
-   actually releases or refunds the locked funds. This is the only step
-   where money moves.
+`<add your Vercel/hosted app URL here>`
 
-Every transaction hash shown in the UI links to a real block explorer
-(Arc's [ArcScan](https://testnet.arcscan.app) or
-[GenLayer Studio's explorer](https://genlayer-explorer.vercel.app)).
+## Contract details
 
-## Quickstart
+| | Network | Chain ID | Explorer |
+|---|---|---|---|
+| Vault (`Vault.sol`) | Arc Testnet | `5042002` | https://testnet.arcscan.app |
+| MeridianAdjudicator / SettlementOutbox | GenLayer Studio (`studionet`) | `61999` | https://explorer-studio.genlayer.com |
+
+- Arc Testnet RPC: `https://rpc.testnet.arc.network`
+- GenLayer Studio RPC: `https://studio.genlayer.com/api`
+- Vault address: `<paste VITE_VAULT_ADDRESS after deploying>`
+- MeridianAdjudicator address: `<paste VITE_MERIDIAN_ADJUDICATOR after deploying>`
+- SettlementOutbox address: `<paste VITE_MERIDIAN_OUTBOX after deploying>`
+
+Arc's native currency **is** USDC, but accounted with 18 decimals (ether-style)
+at the native/`msg.value` layer — a separate ERC-20 view of the same balance
+uses 6 decimals. See [`circlefin/arc-node` #95](https://github.com/circlefin/arc-node/issues/95)
+and [#453](https://github.com/circlefin/arc-node/issues/453).
+
+## Tech stack
+
+- **Frontend:** React 19, TanStack Start / Router / Query, Tailwind v4, Zustand
+- **Wallet / chain:** `viem` (Arc Testnet, injected wallet connection)
+- **GenLayer contract:** Python Intelligent Contracts (`meridian_adjudicator.py`,
+  `settlement_outbox.py`) via `genlayer-js`, called from TanStack Start server
+  functions so the signing key never reaches the browser
+- **Vault contract:** Solidity (`Vault.sol`), compiled with `solc` and deployed
+  with `viem`
+- **Backend/database (optional):** Postgres/Neon if `DATABASE_URL` is set,
+  otherwise an embedded PGLite (Postgres-in-WASM) instance with zero config —
+  used only for future off-chain indexing, not for case state today
+
+## How it works
+
+1. **Connect a wallet** on the "New vault" page (the app prompts it to
+   add/switch to Arc Testnet if needed).
+2. **Deposit** — submitting the form sends a real transaction to `Vault.sol`,
+   locking the deposited USDC.
+3. **Register on GenLayer** — the app calls the real, deployed
+   `MeridianAdjudicator.create_escrow()` with the same case facts (payer,
+   payee, amount, spec, equivalence principle).
+4. **Adjudicate** — "Run adjudication" calls the real `adjudicate()` write.
+   GenLayer's leader fetches the submitted evidence URLs and prompts its
+   model; every validator independently re-runs the same check, and
+   `gl.eq_principle.prompt_comparative` decides via NLP whether their answers
+   agree under the stated equivalence principle.
+5. **Relay settlement** — once finalized, GenLayer's contract has written a
+   message to `SettlementOutbox`. "Relay settlement" reads that message and
+   submits it to `Vault.sol`, which releases or refunds the locked funds.
+
+Every transaction hash shown in the UI links to Arc's or GenLayer's own block
+explorer — nothing is simulated or fabricated at any step.
+
+## How to run locally
 
 ```bash
 npm install
@@ -48,109 +83,43 @@ npm run dev
 ```
 
 The app renders immediately, but creating a case needs both contract systems
-deployed first (below) — there is no zero-setup demo mode, by design.
+deployed first — there is no zero-setup demo mode, by design (see "Contract
+details" above for what to deploy).
 
-## Deploying the GenLayer contracts
+**Environment variables** (see `.env.example`):
 
-Uses [GenLayer Studio](https://docs.genlayer.com/developers/intelligent-contracts/tools/genlayer-studio)
-(`studionet`) — GenLayer's stable, hosted, **gasless** network. A 0 GEN
-balance is expected and doesn't block anything, so there's no faucet step —
-you still need a keypair, just to sign the calls.
+```
+# GenLayer Studio
+VITE_MERIDIAN_ADJUDICATOR=0x...
+VITE_MERIDIAN_OUTBOX=0x...
+GENLAYER_DEPLOYER_KEY=0x...        # server-only, never sent to the browser
 
-1. Install the GenLayer CLI and point it at Studio:
-   ```bash
-   npm install -g genlayer
-   genlayer init
-   genlayer network set studionet
-   ```
-2. Generate a fresh keypair for this project (do **not** use an existing
-   wallet key):
-   ```bash
-   node scripts/gen-testnet-key.mjs
-   ```
-   Copy the printed private key into a local `.env` (never commit it):
-   ```
-   GENLAYER_DEPLOYER_KEY=0x...
-   ```
-3. Deploy the outbox first, then the adjudicator (which needs the outbox's
-   address), then bind them:
-   ```bash
-   genlayer deploy --contract contracts/settlement_outbox.py
-   genlayer deploy --contract contracts/meridian_adjudicator.py --args <outbox_address>
-   # then, calling the outbox as its deployer:
-   # set_adjudicator(<adjudicator_address>)
-   ```
-4. Put both deployed addresses in `.env`:
-   ```
-   VITE_MERIDIAN_ADJUDICATOR=0x...
-   VITE_MERIDIAN_OUTBOX=0x...
-   ```
+# Vault on Arc Testnet
+VITE_VAULT_ADDRESS=0x...
+VAULT_RELAYER_KEY=0x...            # server-only
 
-Note: `studionet` is a shared, rate-limited environment (60 req/min, 1000/hr,
-10000/day per IP) meant for demos and collaboration, not durable storage —
-GenLayer also offers `testnetBradbury`/`testnetAsimov` (funded via a faucet)
-for longer-lived public testnet deployments, and `localnet` for fully local
-development.
+# Optional
+DATABASE_URL=postgres://...
+```
 
-## Deploying the vault (Arc Testnet)
+**Deploying the GenLayer contracts** (gasless on Studio — no faucet needed):
 
-1. Fund a keypair with testnet USDC from the [Circle faucet](https://faucet.circle.com)
-   (select Arc Testnet). This same key can act as both deployer and relayer,
-   or you can split them.
-   ```
-   VAULT_DEPLOYER_KEY=0x...
-   VAULT_RELAYER_KEY=0x...
-   ```
-2. Deploy:
-   ```bash
-   node scripts/deploy-vault.mjs
-   ```
-   This compiles [`contracts/Vault.sol`](contracts/Vault.sol) with `solc` and
-   deploys it via `viem`, printing the deployed address.
-3. Put it in `.env`:
-   ```
-   VITE_VAULT_ADDRESS=0x...
-   ```
+```bash
+npm install -g genlayer
+genlayer init
+genlayer network set studionet
+node scripts/gen-testnet-key.mjs        # generate GENLAYER_DEPLOYER_KEY
+genlayer deploy --contract contracts/settlement_outbox.py
+genlayer deploy --contract contracts/meridian_adjudicator.py --args <outbox_address>
+# then call set_adjudicator(<adjudicator_address>) on the outbox, as its deployer
+```
 
-**A note on decimals:** Arc's native currency (what a wallet's `msg.value`
-means) is USDC accounted with **18 decimals**, ether-style — not the 6
-decimals its separate ERC-20 view uses. Same underlying funds, two
-precisions. See [`circlefin/arc-node` issues #95](https://github.com/circlefin/arc-node/issues/95)
-and [#453](https://github.com/circlefin/arc-node/issues/453). Everything in
-this repo (`Vault.sol`, `src/lib/chain/vault.ts`, `scripts/deploy-vault.mjs`)
-already accounts for this — just don't assume 6 decimals if you extend it.
+**Deploying the vault** (needs testnet USDC from https://faucet.circle.com,
+select Arc Testnet):
 
-Restart `npm run dev` once all four env vars are set, and "New vault" will
-let you create a real case end to end.
-
-See `.env.example` for the full list of environment variables (a real
-Postgres/Neon `DATABASE_URL` is optional too — the app falls back to an
-embedded PGLite instance with zero config).
-
-## Project layout
-
-- [`contracts/Vault.sol`](contracts/Vault.sol) — the source-chain vault:
-  locks a deposit, and only the configured relayer can trigger a payout.
-- [`contracts/meridian_adjudicator.py`](contracts/meridian_adjudicator.py) +
-  [`contracts/settlement_outbox.py`](contracts/settlement_outbox.py) — the
-  GenLayer Intelligent Contracts that judge cases and record verdicts.
-- [`src/lib/protocol/genlayer.ts`](src/lib/protocol/genlayer.ts) — real
-  create/adjudicate/read calls to the deployed GenLayer contracts, each
-  wrapped in a `createServerFn`; TanStack Start extracts the handler into a
-  server-only chunk, so `GENLAYER_DEPLOYER_KEY` never reaches the browser.
-- [`src/lib/chain/`](src/lib/chain) — Arc Testnet wallet connection
-  (`wallet.ts`), the vault's ABI and deposit helper (`vault.ts`), and the
-  relayer that submits GenLayer's verdict to the vault (`relay.ts` /
-  `relay.server.ts`).
-- [`src/lib/protocol/store.ts`](src/lib/protocol/store.ts) — a thin local
-  index of cases this browser has created (id, tx hashes). It is a
-  convenience cache, not the source of truth: the real state lives on Arc
-  and on GenLayer.
-- [`src/routes/`](src/routes) — `new` (connect + deposit + register),
-  `escrows` (docket + case detail with the real adjudicate/relay actions),
-  `vaults`, `settlements`, `protocol` (architecture explainer).
-
-## Development
+```bash
+node scripts/deploy-vault.mjs
+```
 
 ```bash
 npm run typecheck   # tsc --noEmit
@@ -158,3 +127,57 @@ npm run build       # vite build + migrations
 npm test            # domain logic + tooling scripts
 npm run lint
 ```
+
+## Demo evidence
+
+Paste these into "New vault" to test quickly:
+
+- **Payee address:** any valid `0x...` testnet address you control (to see a
+  real payout land)
+- **Amount:** `1`
+- **Spec:** `Pay the research agent if the weekly brief is published at a public URL, covers the named protocols, and cites at least five primary sources from the last quarter.`
+- **Equivalence principle:** `A substantively complete brief is equivalent even if section order or page count differs, provided the named protocols are treated and unique primaries ≥ 5.`
+- **Evidence URL (for "Run adjudication"):** any public URL — try a real
+  research page for a `release_to_payee` verdict, or an unrelated page (e.g. a
+  marketing site) for `refund_to_payer`
+
+## Known limitations
+
+- **AI judgment is not deterministic in the strict sense.** Verdicts come
+  from an LLM reading real web evidence; consensus (independent validators
+  agreeing via NLP) catches disagreement, but a genuinely ambiguous case can
+  still land on a defensible verdict a human might have called differently.
+- **Latency is real, not simulated.** Adjudication has to clear GenLayer's own
+  appeal window before finalizing, and the resulting settlement message is a
+  separate, downstream transaction with its own finalization delay — the full
+  create → adjudicate → relay path can take several minutes end to end.
+- **Evidence is fetched live, in-band.** The leader's `gl.nondet.web.get(url)`
+  call depends on the target page being publicly reachable and stable between
+  the leader's and each validator's independent fetch; a page that changes
+  mid-adjudication or blocks the fetch can produce an inconsistent or failed
+  round.
+- **Testnet-only, single chain today.** Only Arc Testnet is wired for real
+  deposits; `GenLayer Studio` (`studionet`) is a shared, rate-limited
+  environment (60 req/min, 1000/hr, 10000/day per IP) meant for demos, not
+  durable production state.
+- **Long-running server calls don't fit typical serverless timeouts.** The
+  adjudication/relay wait loops can run for minutes; on platforms like Vercel
+  this needs a raised `maxDuration` (or, eventually, moving to client-side
+  polling of a status endpoint instead of one long server call).
+- **No multi-chain vaults yet.** Every case settles on the same Arc vault
+  contract; supporting another source chain means deploying and wiring a new
+  vault, not a config flag.
+
+## Future roadmap
+
+- **Phase 2:** additional source chains (each needs its own deployed vault
+  contract and wallet-network switching support); ERC-20 asset support
+  alongside native USDC; move the adjudicate/relay wait from a blocking server
+  call to client-side polling of a status endpoint, removing the serverless
+  timeout constraint entirely.
+- **Phase 3:** a background relayer service (polling finalized cases and
+  settling automatically, instead of a manual "Relay settlement" click);
+  richer evidence types (signed API responses, oracle attestations, not just
+  fetched URLs); a persisted off-chain index (the optional Postgres/Neon
+  connection already scaffolded in `src/lib/db.ts`) so case history survives
+  clearing browser storage.
