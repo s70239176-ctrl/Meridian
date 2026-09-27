@@ -6,7 +6,6 @@ import { Timeline } from "@/components/protocol/timeline";
 import { chainLabel, formatAmount, formatClock, shortAddr } from "@/lib/protocol/format";
 import { arcExplorerAddressUrl, arcExplorerTxUrl } from "@/lib/chain/explorer";
 import { genlayerExplorerTxUrl } from "@/lib/protocol/genlayer-explorer";
-import { ADJUDICATOR_SOURCE } from "@/lib/protocol/contract-source";
 import { useEscrowStore } from "@/lib/protocol/store";
 import { CHAIN_META } from "@/lib/protocol/types";
 
@@ -124,17 +123,6 @@ function CasePage() {
               </ul>
             </section>
           ) : null}
-
-          <section>
-            <h2 className="font-display text-2xl tracking-tight text-fg">Intelligent Contract</h2>
-            <p className="mt-2 text-sm text-muted">
-              The real, deployed GenLayer source this case runs on. It stores a verdict and emits the payout message
-              only with on="finalized". It does not transfer the vault.
-            </p>
-            <pre className="mt-4 max-h-[32rem] overflow-auto rounded-xl bg-surface p-4 font-mono text-xs leading-relaxed text-muted shadow-[var(--shadow-border)]">
-              {ADJUDICATOR_SOURCE}
-            </pre>
-          </section>
         </div>
 
         <aside className="space-y-8 md:sticky md:top-24 md:max-h-[calc(100dvh-7rem)] md:overflow-y-auto md:self-start">

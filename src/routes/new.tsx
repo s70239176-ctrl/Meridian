@@ -5,7 +5,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { ADJUDICATOR_SOURCE, OUTBOX_SOURCE } from "@/lib/protocol/contract-source";
 import { createEscrowOnGenlayer } from "@/lib/protocol/genlayer";
 import { deployment } from "@/lib/protocol/deployment";
 import { useEscrowStore } from "@/lib/protocol/store";
@@ -144,7 +143,7 @@ function NewEscrow() {
   }
 
   return (
-    <div className="grid gap-10 md:grid-cols-[minmax(0,1fr)_24rem]">
+    <div className="max-w-2xl">
       <div>
         <p className="text-xs font-medium tracking-[0.16em] text-muted uppercase">New vault</p>
         <h1 className="font-display mt-2 text-4xl tracking-tight text-fg">Lock real funds on Arc Testnet</h1>
@@ -201,16 +200,6 @@ function NewEscrow() {
           </Button>
         </form>
       </div>
-
-      <aside className="md:sticky md:top-24 md:self-start">
-        <p className="text-xs font-medium tracking-[0.16em] text-muted uppercase">Deployed contracts</p>
-        <pre className="mt-3 max-h-[32rem] overflow-auto rounded-xl bg-surface p-4 font-mono text-xs leading-relaxed text-muted shadow-[var(--shadow-border)]">
-          {ADJUDICATOR_SOURCE}
-        </pre>
-        <pre className="mt-3 max-h-80 overflow-auto rounded-xl bg-surface p-4 font-mono text-xs leading-relaxed text-muted shadow-[var(--shadow-border)]">
-          {OUTBOX_SOURCE}
-        </pre>
-      </aside>
     </div>
   );
 }
