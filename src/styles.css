@@ -1,46 +1,59 @@
 @import "tailwindcss";
 
 @theme {
-  --color-bg: #09090b;
-  --color-surface: #121214;
-  --color-surface-2: #1a1a1e;
-  --color-fg: #f4f2ee;
-  --color-muted: #8c8a86;
-  --color-faint: #6a6864;
-  --color-primary: #d8dbe3;
-  --color-primary-fg: #09090b;
-  --color-border: #2a2a2e;
-  --color-ring: #d8dbe3;
-  --color-paid: #8fa382;
-  --color-warn: #c4b091;
-  --color-danger: #c48b8b;
-  --color-background: #09090b;
-  --color-foreground: #f4f2ee;
-  --color-card: #121214;
-  --color-card-foreground: #f4f2ee;
-  --color-popover: #121214;
-  --color-popover-foreground: #f4f2ee;
-  --color-accent: #1a1a1e;
-  --color-accent-foreground: #f4f2ee;
-  --color-input: #2a2a2e;
-  --color-destructive: #c48b8b;
-  --color-secondary: #1a1a1e;
-  --color-secondary-foreground: #f4f2ee;
-  --color-muted-foreground: #8c8a86;
+  /* Axiom palette — see design reference. Names kept from the previous
+     system so every existing component class (bg-surface, text-fg,
+     shadow-[var(--shadow-border)], etc.) repaints without edits. */
+  --color-bg: #000000; /* Void */
+  --color-surface: #111111; /* Carbon */
+  --color-surface-2: #191919; /* Graphite */
+  --color-fg: #eeeeee; /* Paper */
+  --color-muted: #b4b4b4; /* Fog */
+  --color-faint: #606060; /* Steel */
+  --color-primary: #da5c2c; /* Ember */
+  --color-primary-fg: #eeeeee; /* Paper */
+  --color-border: #202020; /* Iron */
+  --color-ring: #da5c2c; /* Ember */
+  --color-paid: #eeeeee;
+  --color-warn: #eeeeee;
+  --color-danger: #eeeeee;
+  --color-background: #000000;
+  --color-foreground: #eeeeee;
+  --color-card: #111111;
+  --color-card-foreground: #eeeeee;
+  --color-popover: #111111;
+  --color-popover-foreground: #eeeeee;
+  --color-accent: #191919;
+  --color-accent-foreground: #eeeeee;
+  --color-input: #202020;
+  --color-destructive: #eeeeee;
+  --color-secondary: #191919;
+  --color-secondary-foreground: #eeeeee;
+  --color-muted-foreground: #b4b4b4;
 
-  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
-  --font-display: "Fraunces", "Times New Roman", serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  /* Axiom neutral scale, for treatments the semantic tokens above don't cover */
+  --color-slate: #3a3a3a;
+  --color-pewter: #505050;
+  --color-steel: #606060;
+  --color-ash: #7e7e7e;
+  --color-chalk: #d9d9d9;
+  --color-ember: #da5c2c;
 
-  --radius-xs: 4px;
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
-  --radius-xl: 24px;
-  --radius: 12px;
+  --font-sans: "JetBrains Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --font-display: "JetBrains Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --font-mono: "JetBrains Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 
-  --shadow-border: 0 0 0 1px rgba(255, 255, 255, 0.08);
-  --shadow-border-hover: 0 0 0 1px rgba(255, 255, 255, 0.13);
+  /* Axiom: sharp 2px corners everywhere except pills/icon badges (rounded-full, a static Tailwind utility unaffected by this scale) */
+  --radius-xs: 2px;
+  --radius-sm: 2px;
+  --radius-md: 2px;
+  --radius-lg: 2px;
+  --radius-xl: 2px;
+  --radius: 2px;
+
+  /* Hairline borders instead of soft glows — Axiom has no elevation shadows */
+  --shadow-border: 0 0 0 1px var(--color-border);
+  --shadow-border-hover: 0 0 0 1px var(--color-slate);
 
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-smooth-out: cubic-bezier(0.22, 1, 0.36, 1);

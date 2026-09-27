@@ -13,7 +13,7 @@ const buttonVariants = cva(
           "bg-surface text-fg shadow-[var(--shadow-border)] hover:shadow-[var(--shadow-border-hover)]",
         outline: "text-fg shadow-[var(--shadow-border)] hover:bg-surface",
         ghost: "text-muted hover:text-fg hover:bg-surface",
-        danger: "bg-danger/20 text-danger hover:bg-danger/30",
+        danger: "border border-slate text-fg hover:bg-surface-2",
       },
       size: {
         default: "h-11 min-h-11 px-4",
